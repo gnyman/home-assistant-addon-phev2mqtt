@@ -13,10 +13,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
     go build -trimpath -ldflags="-s -w" -o /out/phev2mqtt .
 WORKDIR /src/launcher
+ARG BUILD_VERSION=development
+ARG SOURCE_REVISION=unknown
 COPY launcher/ ./
 RUN --mount=type=cache,target=/root/.cache/go-build \
     GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
-    go build -trimpath -ldflags="-s -w" -o /out/launcher .
+    go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION} -X main.revision=${SOURCE_REVISION}" -o /out/launcher .
 
 FROM scratch
 ENV HOME=/data

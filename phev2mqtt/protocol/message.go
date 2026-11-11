@@ -120,6 +120,9 @@ func (p *PhevMessage) ShortForm() string {
 		return fmt.Sprintf("START SEND14  (orig %s)", hex.EncodeToString(p.Original))
 
 	case CmdInBadEncoding:
+		if len(p.Data) == 0 {
+			return "BAD ENCODING (missing expected key)"
+		}
 		return fmt.Sprintf("BAD ENCODING  (exp: 0x%02x)", p.Data[0])
 
 	default:

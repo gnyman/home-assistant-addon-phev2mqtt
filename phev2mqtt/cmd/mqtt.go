@@ -434,7 +434,7 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 	defer m.resetChargeState(m.client)
 	var err error
 	address := viper.GetString("address")
-	m.phev, err = client.New(client.AddressOption(address))
+	m.phev, err = client.New(client.AddressOption(address), client.LogPingsOption(logPings))
 	if err != nil {
 		return err
 	}

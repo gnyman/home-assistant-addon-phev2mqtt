@@ -25,10 +25,12 @@ If you connect to the hassio_supervisort docker container, this will be /data/ad
 
 More information about local addons at https://developers.home-assistant.io/docs/add-ons/tutorial/
 
-With `debug: true`, the launcher waits without starting the bridge. For diagnostics,
-execute `/opt/phev2mqtt` directly (for example, `client watch`); there is no
-interactive shell in the minimal image. WiFi is managed by the Home Assistant
-host, so the standalone bridge WiFi restart command is disabled.
+With `debug: true`, the bridge keeps running and logs protocol messages, register
+writes and ACKs, encoding errors, and key resynchronization. Routine PING traffic
+is hidden by default; set `log_pings: true` to include it. Restart the app after
+changing these options. There is no interactive shell in the minimal image;
+execute `/opt/phev2mqtt` directly for diagnostics. WiFi is managed by the Home
+Assistant host, so the standalone WiFi restart command is disabled.
 
 ## Reconnecting
 
@@ -36,6 +38,8 @@ Version 1.8 incorporates [upstream PR #62](https://github.com/buxtronix/phev2mqt
 to close leaked connections and release blocked message queues. It also fixes
 a reader/pinger data race and limits each TCP connection attempt to ten seconds.
 See [reconnect notes](docs/reconnecting.md) for attribution, behavior, and tests.
+
+For climate command troubleshooting, see [climate diagnostics](docs/climate-diagnostics.md).
 
 ## Charging status
 

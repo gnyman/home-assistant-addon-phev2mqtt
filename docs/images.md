@@ -4,7 +4,7 @@ The source repository workflow `.github/workflows/publish.yaml` tests the Go
 bridge and options launcher, cross-compiles static binaries, builds and smoke-tests
 all five configured platforms, then publishes versioned images:
 
-`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10`
+`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10.1`
 
 Architectures: aarch64, amd64, armhf (ARMv6), armv7, and i386. Cross-compilation
 runs on the native build host; QEMU is used only for runtime smoke tests.
@@ -42,14 +42,17 @@ The Go compiler was already excluded by the old multi-stage Dockerfile.
 ## Runtime differences
 
 Configuration keys, MQTT topics and discovery identities are preserved. The
-launcher reads `/data/options.json` and replaces itself with the bridge so the
-bridge receives Supervisor shutdown signals directly. Optional null MQTT
-credentials become empty strings. Both numeric and string port values are accepted. TLS root certificates remain available.
+launcher reports the app version and source commit, reads `/data/options.json`,
+and replaces itself with the bridge so the bridge receives Supervisor shutdown
+signals directly. Optional null MQTT
+credentials become empty strings. Both numeric and string port values are
+accepted. TLS root certificates remain available.
 
 There is no shell, Bashio, package manager, or packet-capture support in the
 image. The pcap command was already excluded from ordinary builds by its build
-tag. For diagnostics, execute `/opt/phev2mqtt` directly. Debug mode waits for a
-shutdown signal without launching the bridge. Host WiFi is managed by HA; the
+tag. For diagnostics, execute `/opt/phev2mqtt` directly. Debug mode starts the
+bridge with `--verbosity debug`. Routine ping traffic is hidden unless
+`log_pings: true` is set. Host WiFi is managed by HA; the
 standalone Linux WiFi restart shell command is explicitly disabled.
 
 Go modules and compiled packages are cached during image builds. Only stripped

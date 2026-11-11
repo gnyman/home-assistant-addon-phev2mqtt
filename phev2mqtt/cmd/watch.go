@@ -37,7 +37,7 @@ updates, displaying them in real-time.`,
 
 func Run(cmd *cobra.Command, args []string) {
 	address, _ := cmd.Flags().GetString("address")
-	cl, err := client.New(client.AddressOption(address))
+	cl, err := client.New(client.AddressOption(address), client.LogPingsOption(logPings))
 	if err != nil {
 		panic(err)
 	}

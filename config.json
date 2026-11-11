@@ -1,6 +1,6 @@
 {
   "name": "PHEV-DRAGONS",
-  "version": "1.10",
+  "version": "1.10.1",
   "slug": "phev-dragons",
   "description": "Mitsubishi PHEV",
   "arch": [
@@ -19,7 +19,8 @@
     "mqtt_password": null,
     "debug": false,
     "phev_ip": "192.168.8.46",
-    "phev_port": "8080"
+    "phev_port": "8080",
+    "log_pings": false
   },
   "schema": {
     "mqtt_server": "str",
@@ -27,7 +28,8 @@
     "mqtt_password": "str",
     "debug": "bool",
     "phev_ip": "str",
-    "phev_port": "port"
+    "phev_port": "port",
+    "log_pings": "bool"
   },
   "url": "https://github.com/gnyman/home-assistant-addon-phev2mqtt",
   "apparmor": true,

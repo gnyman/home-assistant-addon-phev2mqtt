@@ -99,7 +99,8 @@ type Client struct {
 	dialTimeout time.Duration
 	dialContext func(context.Context, string, string) (net.Conn, error)
 
-	key *protocol.SecurityKey
+	logPings bool
+	key      *protocol.SecurityKey
 
 	// Keep track of the model year so we can use the correct registers
 	ModelYear ModelYear
@@ -126,6 +127,11 @@ func AddressOption(address string) func(*Client) {
 	return func(c *Client) {
 		c.address = address
 	}
+}
+
+// LogPingsOption includes routine keepalive packets in protocol logs.
+func LogPingsOption(enabled bool) Option {
+	return func(c *Client) { c.logPings = enabled }
 }
 
 // New returns a new client, not yet connected.
@@ -279,6 +285,8 @@ func (c *Client) SetRegister(register byte, value []byte) error {
 			Xor:      xor,
 		})
 	}
+	log.Debugf("Register write requested: reg 0x%02x data %s", register, hex.EncodeToString(value))
+	encodingRetries := 0
 	xor := byte(0)
 	timer := time.After(10 * time.Second)
 	l := c.AddListener()
@@ -292,7 +300,7 @@ SETREG:
 		case <-c.done:
 			return fmt.Errorf("client closed")
 		case <-timer:
-			return fmt.Errorf("timed out attempting to set register %02x", register)
+			return fmt.Errorf("timed out attempting to set register %02x: no write ACK within 10s (%d encoding retries)", register, encodingRetries)
 		case msg, ok := <-l.C:
 			if !ok {
 				return fmt.Errorf("listener channel closed")
@@ -302,9 +310,12 @@ SETREG:
 					return fmt.Errorf("bad encoding response omitted expected key")
 				}
 				xor = msg.Data[0]
+				encodingRetries++
+				log.Debugf("Retrying register write: reg 0x%02x after encoding complaint, expected key %02x (retry %d)", register, xor, encodingRetries)
 				goto SETREG
 			}
 			if msg.Type == protocol.CmdInResp && msg.Ack == protocol.Ack && msg.Register == register {
+				log.Debugf("Register write acknowledged: reg 0x%02x (%d encoding retries)", register, encodingRetries)
 				return nil
 			}
 
@@ -444,15 +455,17 @@ func (c *Client) reader() {
 		c.lastRxMu.Lock()
 		c.lastRx = time.Now()
 		c.lastRxMu.Unlock()
-		log.Tracef("%%PHEV_TCP_RECV_DATA%%: %s", hex.EncodeToString(data[:n]))
 		messages := protocol.NewFromBytes(data[:n], c.key)
+		if len(messages) == 0 {
+			log.Tracef("%%PHEV_TCP_RECV_UNDECODED%%: %s", hex.EncodeToString(data[:n]))
+		}
 		for _, m := range messages {
 			if m.Type == protocol.CmdInBadEncoding && len(m.Data) > 0 {
 				if c.key.ResyncSend(m.Data[0]) {
 					log.Debugf("%%PHEV_SEND_KEY_RESYNC%% expected %02x", m.Data[0])
 				}
 			}
-			log.Debugf("%%PHEV_TCP_RECV_MSG%%: [%02x] %s", m.Xor, m.ShortForm())
+			c.logMessage("RECV", m, m.OriginalXored)
 			c.lMu.Lock()
 			for _, l := range c.listeners {
 				l.Send(m)
@@ -481,8 +494,7 @@ func (c *Client) writer() {
 			}
 			msg.Xor = 0
 			data := msg.EncodeToBytes(c.key)
-			log.Debugf("%%PHEV_TCP_SEND_MSG%%: [%02x] %s", msg.Xor, msg.ShortForm())
-			log.Tracef("%%PHEV_TCP_SEND_DATA%%: %s", hex.EncodeToString(data))
+			c.logMessage("SEND", msg, data)
 			c.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 			if _, err := c.conn.Write(data); err != nil {
 				if !c.isClosed() {
@@ -494,4 +506,15 @@ func (c *Client) writer() {
 			}
 		}
 	}
+}
+
+// Filter only routine keepalives; register writes, ACKs and errors stay visible.
+func (c *Client) logMessage(direction string, msg *protocol.PhevMessage, raw []byte) {
+	if !c.logPings && (msg.Type == protocol.CmdOutPingReq || msg.Type == protocol.CmdInPingResp) {
+		return
+	}
+	if log.IsLevelEnabled(log.DebugLevel) {
+		log.Debugf("%%PHEV_TCP_%s_MSG%%: [%02x] %s", direction, msg.Xor, msg.ShortForm())
+	}
+	log.Tracef("%%PHEV_TCP_%s_DATA%%: %s", direction, hex.EncodeToString(raw))
 }

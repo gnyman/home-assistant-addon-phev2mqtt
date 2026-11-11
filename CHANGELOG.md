@@ -1,3 +1,10 @@
+# Version 1.10.1
+* Make debug enable protocol debug logging while the bridge keeps running, instead of pausing the app
+* Hide routine ping requests and responses by default; enable log_pings to include them
+* Print the app version and source commit on startup for build identification
+* Keep register writes, acknowledgements, encoding complaints and key resynchronization visible; report encoding retry counts on write timeouts
+* Exercise climate wire payload, ACK matching and encoding recovery against in-memory simulated peers without controlling a real vehicle
+
 # Version 1.10
 * Publish tested images for all five supported architectures to GHCR; Home Assistant downloads the image instead of compiling on the device
 * Use a stripped static bridge and options launcher in a minimal runtime with TLS certificates, without an OS, shell, Bashio, or unused libpcap packages
