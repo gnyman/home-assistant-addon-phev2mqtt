@@ -1,7 +1,7 @@
 {
-  "name": "PHEV",
-  "version": "1.8",
-  "slug": "phev",
+  "name": "PHEV-DRAGONS",
+  "version": "1.9",
+  "slug": "phev-dragons",
   "description": "Mitsubishi PHEV",
   "arch": [
     "armhf",

@@ -1,3 +1,6 @@
+# Version 1.9
+* Rename the app to PHEV-DRAGONS with the distinct `phev-dragons` slug so the old local PHEV installation can be kept
+
 # Version 1.8
 * Remove obsolete nested add-on metadata so Home Assistant discovers exactly one PHEV app
 * Incorporate [upstream PR #62](https://github.com/buxtronix/phev2mqtt/pull/62), preserving its original authorship, to release leaked connections and unblock shutdown/reconnection

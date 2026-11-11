@@ -1,4 +1,4 @@
-# Home Assistant add-on: PHEV to MQTT
+# Home Assistant add-on: PHEV-DRAGONS
 
 Source: https://github.com/gnyman/home-assistant-addon-phev2mqtt
 
@@ -9,11 +9,13 @@ This requires that Home Assistant is already connected to the Outlander, you sho
 Once installed as a local addon, you must configure the mqtt target and username/password before start and stop phev2mqtt from the GUI
 For my docker install the host machine's address (which is also running the mqtt addon) is 172.30.32.1:1883 (I suspect this could be different depending on install)
 
-These files need to go in a directory (called phev for example) in the local addons.
+PHEV-DRAGONS uses the `phev-dragons` slug and can be installed alongside the old local PHEV app. Keep only one bridge running at a time.
 
-If you ssh into the main os, this will be in /usr/share/hassio/addons/local/phev
-If you ssh in using the terminal add on, this will be /addons/phev (or symblink /root/addons/phev)
-If you connect to the hassio_supervisort docker container, this will be /data/addons/local/phev
+For a local installation, put these files in a directory called `phev-dragons` in the local addons.
+
+If you ssh into the main os, this will be in /usr/share/hassio/addons/local/phev-dragons
+If you ssh in using the terminal add on, this will be /addons/phev-dragons (or symblink /root/addons/phev-dragons)
+If you connect to the hassio_supervisort docker container, this will be /data/addons/local/phev-dragons
 
 More information about local addons at https://developers.home-assistant.io/docs/add-ons/tutorial/
 
