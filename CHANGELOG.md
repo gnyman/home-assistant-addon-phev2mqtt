@@ -1,9 +1,17 @@
+# Version 1.7
+* Add a Home Assistant Charge State sensor on `<prefix>/charge/state`: charging, waiting, unplugged, idle, or error
+* Decode timer waiting/error from register `0x1e`, giving these flags priority over the charging bit
+* Keep `/charge/charging` and its binary sensor unchanged for existing automations
+* Invalidate the new sensor on reconnect or unknown data; require fresh charging data after plug-state changes
+
 # Version 1.6
+* Recover the transmit-key position from the car’s encoding complaints; verify resume-timer on MY20 by write ACK and `0x1b=02` notification
+* Invalidate override availability on unknown data and car/MQTT reconnections
 * Vendor the phev2mqtt build source and build it from the local add-on copy instead of cloning from git
 * Fix `init` to be a JSON boolean (`false`) and bump the add-on version to 1.6
 * Add an experimental charge timer override switch: ON writes register `0x17` with `01`, OFF writes register `0x17` with `02`
 * Add `<prefix>/set/charge/override`; keep `<prefix>/set/cancelchargetimer` as a validated legacy alias for `on`/`off`
-* Publish `<prefix>/charge/override` only from incoming register `0x1b` notifications; initial state stays unknown until one arrives
+* Publish `<prefix>/charge/override` only from incoming register `0x1b` notifications; status stays unavailable until fresh valid data arrives
 * Replace the old incorrect switch discovery (charging state / legacy command topic) while retaining the existing unique id and discovery topic
 * Add offline unit tests and charge override documentation with third-party provenance
 

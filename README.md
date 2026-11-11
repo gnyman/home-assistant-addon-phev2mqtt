@@ -1,3 +1,9 @@
+# Home Assistant add-on: PHEV to MQTT
+
+Source: https://github.com/gnyman/home-assistant-addon-phev2mqtt
+
+Bridge: https://github.com/gnyman/phev2mqtt (vendored in `phev2mqtt/`).
+
 This requires that Home Assistant is already connected to the Outlander, you should be able to check this by ensuring that you can ping 192.168.8.46
 
 Once installed as a local addon, you must configure the mqtt target and username/password before start and stop phev2mqtt from the GUI
@@ -13,11 +19,24 @@ More information about local addons at https://developers.home-assistant.io/docs
 
 If you set the debug flag on, it will just start the container and sleep indefinitely, you can then run the phev2mqtt manually, to run "phev2mqtt client watch" for example.
 
+## Charging status
+
+Version 1.7 adds a Home Assistant **Charge State** sensor on
+`<prefix>/charge/state`. It reports `charging`, `waiting`, `unplugged`, `idle`,
+or `error`. Waiting means the car reports waiting for its charging timer;
+error means it reports a charge-timer error. Idle means connected but not
+charging, without a waiting/error flag; it does not imply a full battery.
+
+Unknown data and reconnects make the sensor unavailable until fresh status
+arrives. The existing `<prefix>/charge/charging` topic and Charging binary
+sensor still publish only `on`/`off`, so existing automations keep working.
+See [docs/charge-state.md](docs/charge-state.md) for decoding and precedence.
+
 ## Charge timer override (experimental)
 
 Version 1.6 adds an experimental Home Assistant switch for the charge timer
-override. It is based on third-party PHEV Link protocol evidence and has not
-been verified against a live MY20 vehicle. See
+override. It is based on PHEV Link protocol evidence. Resume-timer / override OFF
+was acknowledged and verified by status read-back on the user’s MY20. See
 [docs/charge-override.md](docs/charge-override.md) for provenance and limitations.
 
 | Topic | Direction | Behavior |
@@ -28,10 +47,11 @@ been verified against a live MY20 vehicle. See
 | `<prefix>/register/1b` | state | Existing raw register `0x1b` hex value |
 
 Payloads other than `on` or `off` (case-insensitive with surrounding whitespace
-trimmed) are rejected without writing anything. The switch stays unknown until
-a real register `0x1b` notification arrives; commands do not set optimistic
-state. The existing `SetRegister` 10-second ACK timeout and transport behavior
-are unchanged, so the known charge-now ACK timeout may persist.
+trimmed) are rejected without writing anything. The switch stays unavailable until
+a fresh valid register `0x1b` notification arrives; commands do not set optimistic
+state. Unknown data and reconnections invalidate the previous state. The client
+now resynchronizes its send key when the car requests it; the 10-second write
+ACK timeout is preserved. See the protocol notes for validation and limitations.
 
 NOTE - on 32bit Raspberry Pi there's an issue with the latest alpine docker images and old versions of libseccomp (including the ones in Raspbian repos), this will stop the Dockerfile building. In order to overcome this, you may need to manually install a newer version with
 
