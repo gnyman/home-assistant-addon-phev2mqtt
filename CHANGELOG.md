@@ -1,3 +1,6 @@
+# Version 1.9.1
+* Set a default Home Assistant base image so builds work when Supervisor does not provide BUILD_FROM (2026.04 and later)
+
 # Version 1.9
 * Rename the app to PHEV-DRAGONS with the distinct `phev-dragons` slug so the old local PHEV installation can be kept
 

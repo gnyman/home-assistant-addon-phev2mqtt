@@ -1,5 +1,5 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM as builder
+ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
+FROM $BUILD_FROM AS builder
 
 RUN apk update && apk add --no-cache \
 	g++ \
