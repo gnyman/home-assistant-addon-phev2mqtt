@@ -2,12 +2,14 @@
 
 The source repository workflow `.github/workflows/publish.yaml` tests the Go
 bridge and options launcher, cross-compiles static binaries, builds and smoke-tests
-all five configured platforms, then publishes versioned images:
+both supported platforms, then publishes versioned images:
 
-`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10.1`
+`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10.2`
 
-Architectures: aarch64, amd64, armhf (ARMv6), armv7, and i386. Cross-compilation
-runs on the native build host; QEMU is used only for runtime smoke tests.
+Architectures: aarch64 (ARM64) and amd64 (x86-64). Home Assistant no longer
+supports the 32-bit i386, armhf, and armv7 architectures, so their image builds
+are disabled. Cross-compilation runs on the native build host; QEMU is used
+only for runtime smoke tests.
 Each workflow job reports unpacked image bytes and compressed registry layer bytes.
 
 ## First publication
@@ -15,7 +17,7 @@ Each workflow job reports unpacked image bytes and compressed registry layer byt
 1. Push the source branch `phev-dragons` to
    `gnyman/home-assistant-addon-phev2mqtt`. Pushes to `main` also run the workflow.
 2. Wait for every image job to pass. Pull-request builds test without publishing.
-3. In the source repository's GitHub Packages settings, make all five new
+3. In the source repository's GitHub Packages settings, make both new
    container packages **public**. A public repository does not guarantee a new
    package is public. Confirm each image can be pulled without authentication.
 4. Only then push the `ha-addons` commit pinning this source revision. Its

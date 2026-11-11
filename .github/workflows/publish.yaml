@@ -35,12 +35,6 @@ jobs:
             platform: linux/arm64
           - arch: amd64
             platform: linux/amd64
-          - arch: armhf
-            platform: linux/arm/v6
-          - arch: armv7
-            platform: linux/arm/v7
-          - arch: i386
-            platform: linux/386
     steps:
       - uses: actions/checkout@v5
       - name: Image metadata

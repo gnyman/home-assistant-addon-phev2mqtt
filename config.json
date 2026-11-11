@@ -1,14 +1,11 @@
 {
   "name": "PHEV-DRAGONS",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "slug": "phev-dragons",
   "description": "Mitsubishi PHEV",
   "arch": [
-    "armhf",
-    "armv7",
     "aarch64",
-    "amd64",
-    "i386"
+    "amd64"
   ],
   "startup": "application",
   "boot": "auto",

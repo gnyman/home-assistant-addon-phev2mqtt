@@ -4,6 +4,8 @@ Source: https://github.com/gnyman/home-assistant-addon-phev2mqtt
 
 Bridge: https://github.com/gnyman/phev2mqtt (vendored in `phev2mqtt/`).
 
+Supported Home Assistant architectures: **aarch64** and **amd64**.
+
 Version 1.10 uses prebuilt images from GHCR, so the Home Assistant device only
 downloads and extracts a small image. The runtime contains a static bridge,
 a small Home Assistant options launcher, and TLS certificates. It has no shell
@@ -74,11 +76,6 @@ a fresh valid register `0x1b` notification arrives; commands do not set optimist
 state. Unknown data and reconnections invalidate the previous state. The client
 now resynchronizes its send key when the car requests it; the 10-second write
 ACK timeout is preserved. See the protocol notes for validation and limitations.
-
-NOTE - on 32bit Raspberry Pi there's an issue with the latest alpine docker images and old versions of libseccomp (including the ones in Raspbian repos), this will stop the Dockerfile building. In order to overcome this, you may need to manually install a newer version with
-
-    wget http://ftp.us.debian.org/debian/pool/main/libs/libseccomp/libseccomp2_2.4.4-1~bpo10+1_armhf.deb
-    dpkg -i libseccomp2_2.4.4-1~bpo10+1_armhf.deb
 
 ## Development workspace
 

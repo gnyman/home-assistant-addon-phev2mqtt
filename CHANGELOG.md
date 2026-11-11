@@ -1,3 +1,7 @@
+# Version 1.10.2
+* Build and advertise only the supported Home Assistant architectures: aarch64 and amd64
+* Disable unsupported i386, armhf and armv7 image targets, and remove obsolete 32-bit installation guidance
+
 # Version 1.10.1
 * Make debug enable protocol debug logging while the bridge keeps running, instead of pausing the app
 * Hide routine ping requests and responses by default; enable log_pings to include them
