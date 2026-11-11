@@ -1,3 +1,9 @@
+# Version 1.10
+* Publish tested images for all five supported architectures to GHCR; Home Assistant downloads the image instead of compiling on the device
+* Use a stripped static bridge and options launcher in a minimal runtime with TLS certificates, without an OS, shell, Bashio, or unused libpcap packages
+* Keep configuration keys and MQTT discovery identities; debug mode pauses the bridge and handles shutdown signals
+* Disable the standalone bridge WiFi restart shell command because Home Assistant manages the host network
+
 # Version 1.9.1
 * Set a default Home Assistant base image so builds work when Supervisor does not provide BUILD_FROM (2026.04 and later)
 

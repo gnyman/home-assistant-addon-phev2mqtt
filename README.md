@@ -4,6 +4,12 @@ Source: https://github.com/gnyman/home-assistant-addon-phev2mqtt
 
 Bridge: https://github.com/gnyman/phev2mqtt (vendored in `phev2mqtt/`).
 
+Version 1.10 uses prebuilt images from GHCR, so the Home Assistant device only
+downloads and extracts a small image. The runtime contains a static bridge,
+a small Home Assistant options launcher, and TLS certificates. It has no shell
+or package manager. The build toolchain stays out of the runtime image.
+See [image publishing](docs/images.md) for release steps and size measurements.
+
 This requires that Home Assistant is already connected to the Outlander, you should be able to check this by ensuring that you can ping 192.168.8.46
 
 Once installed as a local addon, you must configure the mqtt target and username/password before start and stop phev2mqtt from the GUI
@@ -19,7 +25,10 @@ If you connect to the hassio_supervisort docker container, this will be /data/ad
 
 More information about local addons at https://developers.home-assistant.io/docs/add-ons/tutorial/
 
-If you set the debug flag on, it will just start the container and sleep indefinitely, you can then run the phev2mqtt manually, to run "phev2mqtt client watch" for example.
+With `debug: true`, the launcher waits without starting the bridge. For diagnostics,
+execute `/opt/phev2mqtt` directly (for example, `client watch`); there is no
+interactive shell in the minimal image. WiFi is managed by the Home Assistant
+host, so the standalone bridge WiFi restart command is disabled.
 
 ## Reconnecting
 

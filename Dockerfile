@@ -1,24 +1,27 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
-FROM $BUILD_FROM AS builder
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM golang:1.25.5-alpine3.22 AS builder
+WORKDIR /src/bridge
+ENV CGO_ENABLED=0
+COPY phev2mqtt/go.mod phev2mqtt/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY phev2mqtt/ ./
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags="-s -w" -o /out/phev2mqtt .
+WORKDIR /src/launcher
+COPY launcher/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags="-s -w" -o /out/launcher .
 
-RUN apk update && apk add --no-cache \
-	g++ \
-	gcc \
-	libpcap-dev
-
-COPY --from=golang:alpine /usr/local/go/ /usr/local/go/
-
-WORKDIR /tmp/phev2mqtt
-COPY phev2mqtt/ .
-RUN /usr/local/go/bin/go build
-
-FROM $BUILD_FROM
-RUN apk update && apk add --no-cache \
-	libpcap-dev
-
-COPY --from=builder /tmp/phev2mqtt/phev2mqtt /opt/phev2mqtt
-
-COPY run.sh /opt
-RUN chmod a+x /opt/run.sh
-
-CMD [ "/opt/run.sh" ]
+FROM scratch
+ENV HOME=/data
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /out/phev2mqtt /opt/phev2mqtt
+COPY --from=builder /out/launcher /opt/launcher
+COPY LICENSE /LICENSE
+CMD ["/opt/launcher"]

@@ -1,6 +1,6 @@
 {
   "name": "PHEV-DRAGONS",
-  "version": "1.9.1",
+  "version": "1.10",
   "slug": "phev-dragons",
   "description": "Mitsubishi PHEV",
   "arch": [
@@ -30,5 +30,6 @@
     "phev_port": "port"
   },
   "url": "https://github.com/gnyman/home-assistant-addon-phev2mqtt",
-  "apparmor": true
+  "apparmor": true,
+  "image": "ghcr.io/gnyman/{arch}-addon-phev-dragons"
 }
