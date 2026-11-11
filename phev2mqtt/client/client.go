@@ -208,6 +208,9 @@ SETREG:
 				return fmt.Errorf("listener channel closed")
 			}
 			if msg.Type == protocol.CmdInBadEncoding {
+				if len(msg.Data) == 0 {
+					return fmt.Errorf("bad encoding response omitted expected key")
+				}
 				xor = msg.Data[0]
 				goto SETREG
 			}
@@ -328,6 +331,11 @@ func (c *Client) reader() {
 		log.Tracef("%%PHEV_TCP_RECV_DATA%%: %s", hex.EncodeToString(data[:n]))
 		messages := protocol.NewFromBytes(data[:n], c.key)
 		for _, m := range messages {
+			if m.Type == protocol.CmdInBadEncoding && len(m.Data) > 0 {
+				if c.key.ResyncSend(m.Data[0]) {
+					log.Debugf("%%PHEV_SEND_KEY_RESYNC%% expected %02x", m.Data[0])
+				}
+			}
 			log.Debugf("%%PHEV_TCP_RECV_MSG%%: [%02x] %s", m.Xor, m.ShortForm())
 			c.lMu.Lock()
 			for _, l := range c.listeners {

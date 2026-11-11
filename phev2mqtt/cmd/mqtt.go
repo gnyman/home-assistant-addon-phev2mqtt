@@ -152,8 +152,9 @@ type mqttClient struct {
 	haDiscoveryPrefix    string
 	haPublishedDiscovery bool
 
-	climate *climate
-	enabled bool
+	climate     *climate
+	chargeState chargeState
+	enabled     bool
 }
 
 func (m *mqttClient) topic(topic string) string {
@@ -187,6 +188,7 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 		SetUsername(mqttUsername).
 		SetPassword(mqttPassword).
 		SetAutoReconnect(true).
+		SetOnConnectHandler(m.onMqttConnect).
 		SetDefaultPublishHandler(m.handleIncomingMqtt).
 		SetWill(m.topic("/available"), "offline", 0, true)
 
@@ -241,6 +243,19 @@ func (m *mqttClient) publish(topic, payload string) {
 	m.client.Publish(m.topic(topic), 0, false, payload)
 	m.mqttData[topic] = payload
 	// }
+}
+
+func (m *mqttClient) onMqttConnect(c mqtt.Client) {
+	m.publishOverrideAvailability(c, false)
+	m.resetChargeState(c)
+}
+
+func (m *mqttClient) publishOverrideAvailability(c mqtt.Client, available bool) {
+	state := "offline"
+	if available {
+		state = "online"
+	}
+	c.Publish(m.topic("/charge/override/available"), 0, true, state)
 }
 
 func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Message) {
@@ -413,6 +428,10 @@ func handleChargeTimerOverride(topic, prefix string, payload []byte, setter regi
 }
 
 func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
+	m.publishOverrideAvailability(m.client, false)
+	defer m.publishOverrideAvailability(m.client, false)
+	m.resetChargeState(m.client)
+	defer m.resetChargeState(m.client)
 	var err error
 	address := viper.GetString("address")
 	m.phev, err = client.New(client.AddressOption(address))
@@ -490,8 +509,15 @@ var boolOpen = map[bool]string{
 func (m *mqttClient) publishRegister(msg *protocol.PhevMessage) {
 	dataStr := hex.EncodeToString(msg.Data)
 	m.publish(fmt.Sprintf("/register/%02x", msg.Register), dataStr)
+	m.publishChargeState(msg)
 	if msg.Register == protocol.ChargeTimerStateRegister {
-		m.publish("/charge/override", protocol.ParseChargeTimerState(msg.Data))
+		state := protocol.ParseChargeTimerState(msg.Data)
+		m.publish("/charge/override", state)
+		if state != "unknown" {
+			// A fresh notification also restores global availability after MQTT reconnect.
+			m.client.Publish(m.topic("/available"), 0, true, "online")
+		}
+		m.publishOverrideAvailability(m.client, state != "unknown")
 	}
 	switch reg := msg.Reg.(type) {
 	case *protocol.RegisterVIN:
@@ -704,6 +730,23 @@ func homeAssistantDiscoveryMessages(vin, topic, name, discoveryPrefix string) ma
 			"model": "Outlander PHEV"
 		},
 		"~": "__TOPIC__"}`,
+		"%s/sensor/%s_charge_state/config": `{
+		"name": "__NAME__ Charge State",
+		"state_topic": "~/charge/state",
+		"icon": "mdi:ev-station",
+		"availability": [
+			{"topic": "~/available"},
+			{"topic": "~/charge/state/available"}
+		],
+		"availability_mode": "all",
+		"unique_id": "__VIN___charge_state",
+		"dev": {
+			"name": "PHEV __VIN__",
+			"identifiers": ["phev-__VIN__"],
+			"manufacturer": "Mitsubishi",
+			"model": "Outlander PHEV"
+		},
+		"~": "__TOPIC__"}`,
 		"%s/binary_sensor/%s_charger_connected/config": `{
 		"device_class": "plug",
 		"name": "__NAME__ Charger Connected",
@@ -741,7 +784,11 @@ func homeAssistantDiscoveryMessages(vin, topic, name, discoveryPrefix string) ma
 		"command_topic": "~/set/charge/override",
 		"payload_on": "on",
 		"payload_off": "off",
-		"avty_t": "~/available",
+		"availability": [
+			{"topic": "~/available"},
+			{"topic": "~/charge/override/available"}
+		],
+		"availability_mode": "all",
 		"unique_id": "__VIN___cancel_charge_timer",
 		"dev": {
 			"name": "PHEV __VIN__",

@@ -3,6 +3,10 @@
 Utility to interact with a Mitsubishi Outlander PHEV via the Wifi remote
 control protocol.
 
+This fork is maintained at https://github.com/gnyman/phev2mqtt and is based on
+https://github.com/buxtronix/phev2mqtt. The companion add-on is at
+https://github.com/gnyman/home-assistant-addon-phev2mqtt.
+
 Inspired by https://github.com/phev-remote/ but written entirely in Go.
 
 For further hacking, read the [protocol documentation](protocol/README.md).
@@ -107,6 +111,8 @@ The following topics are published:
 | phev/climate/mode | Mode of the AC, if on. *cool*, *heat*, *windscreen* |
 | phev/climate/[mode] | Alternative of above. Modes are *cool*, *heat*, *windscreen* which can be *off* or *on* |
 | phev/charge/charging | Whether the battery is charging. *on* or *off* |
+| phev/charge/state | Charging status: *charging*, *waiting*, *unplugged*, *idle*, *error*, or *unknown*. See [decoding and freshness](docs/charge-state.md). |
+| phev/charge/state/available | Charge-state freshness: *online* or *offline*. |
 | phev/charge/override | Experimental charge timer override state. *on*, *off*, or *unknown* from register 0x1b notifications |
 | phev/charge/plug | If the charging plug is *unplugged* or *connected*. |
 | phev/charge/remaining | Minutes left, if charging. |
