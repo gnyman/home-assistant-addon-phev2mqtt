@@ -5,7 +5,9 @@ control protocol.
 
 This fork is maintained at https://github.com/gnyman/phev2mqtt and is based on
 https://github.com/buxtronix/phev2mqtt. The companion add-on is at
-https://github.com/gnyman/home-assistant-addon-phev2mqtt.
+https://github.com/gnyman/home-assistant-addon-phev2mqtt. The obsolete embedded
+`addon/` wrapper has been removed so vendoring this bridge cannot introduce a
+second Home Assistant app with the same slug.
 
 Inspired by https://github.com/phev-remote/ but written entirely in Go.
 
