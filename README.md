@@ -13,6 +13,26 @@ More information about local addons at https://developers.home-assistant.io/docs
 
 If you set the debug flag on, it will just start the container and sleep indefinitely, you can then run the phev2mqtt manually, to run "phev2mqtt client watch" for example.
 
+## Charge timer override (experimental)
+
+Version 1.6 adds an experimental Home Assistant switch for the charge timer
+override. It is based on third-party PHEV Link protocol evidence and has not
+been verified against a live MY20 vehicle. See
+[docs/charge-override.md](docs/charge-override.md) for provenance and limitations.
+
+| Topic | Direction | Behavior |
+|---|---|---|
+| `<prefix>/set/charge/override` | command | `on` writes register `0x17` with `01`; `off` writes register `0x17` with `02` |
+| `<prefix>/set/cancelchargetimer` | command | Legacy alias for the same validated `on`/`off` behavior |
+| `<prefix>/charge/override` | state | `on`, `off`, or `unknown`, derived only from incoming register `0x1b` notifications |
+| `<prefix>/register/1b` | state | Existing raw register `0x1b` hex value |
+
+Payloads other than `on` or `off` (case-insensitive with surrounding whitespace
+trimmed) are rejected without writing anything. The switch stays unknown until
+a real register `0x1b` notification arrives; commands do not set optimistic
+state. The existing `SetRegister` 10-second ACK timeout and transport behavior
+are unchanged, so the known charge-now ACK timeout may persist.
+
 NOTE - on 32bit Raspberry Pi there's an issue with the latest alpine docker images and old versions of libseccomp (including the ones in Raspbian repos), this will stop the Dockerfile building. In order to overcome this, you may need to manually install a newer version with
 
     wget http://ftp.us.debian.org/debian/pool/main/libs/libseccomp/libseccomp2_2.4.4-1~bpo10+1_armhf.deb
