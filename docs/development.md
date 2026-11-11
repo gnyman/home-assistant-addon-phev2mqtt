@@ -21,3 +21,15 @@ upstream authorship. Existing upstream Go module/import paths are retained.
 AI implementation authors use the names `gpt-6.1` and `deepseek-flash` with
 placeholder emails under `ai.invalid`; Gabriel N <gabriel@nyman.re> is credited
 with a Co-authored-by trailer on each session-created commit.
+
+## Persistent workspace
+
+Only `/workspace/phev` is volume-mounted in the sandbox. Keep sibling project
+checkouts, research, session history, and artifacts under its ignored `.local/`
+directory. The standalone bridge checkout is `.local/repos/phev2mqtt`, and the
+Home Assistant app-store checkout is `.local/repos/ha-addons`. These are separate
+Git repositories, not the tracked `phev2mqtt/` subtree used by the add-on build.
+
+See [workspace locations and continuation notes](workspace.md). `.local/` is
+excluded from both Git and the Docker build context, and its hidden path keeps
+Supervisor from discovering its development/reference add-on configurations.

@@ -64,3 +64,8 @@ NOTE - on 32bit Raspberry Pi there's an issue with the latest alpine docker imag
 
     wget http://ftp.us.debian.org/debian/pool/main/libs/libseccomp/libseccomp2_2.4.4-1~bpo10+1_armhf.deb
     dpkg -i libseccomp2_2.4.4-1~bpo10+1_armhf.deb
+
+## Development workspace
+
+For the mounted sandbox checkouts, retained research, artifacts, and publication
+state, see [the workspace map](docs/workspace.md).

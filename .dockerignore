@@ -1,0 +1,6 @@
+.git
+**/.git
+.local
+*.swp
+*.swo
+phev2mqtt/phev2mqtt
