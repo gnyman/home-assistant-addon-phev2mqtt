@@ -45,6 +45,7 @@ func Run(cmd *cobra.Command, args []string) {
 	if err := cl.Connect(); err != nil {
 		panic(err)
 	}
+	defer cl.Close()
 
 	if err := cl.Start(); err != nil {
 		panic(err)
@@ -69,12 +70,15 @@ func Run(cmd *cobra.Command, args []string) {
 						log.Infof("%%PHEV_REG_UPDATE%% %02x: [%s]", m.Register, m.Reg.String())
 					}
 				}
-				cl.Send <- &protocol.PhevMessage{
+				if err := cl.SendMessage(&protocol.PhevMessage{
 					Type:     protocol.CmdOutSend,
 					Register: m.Register,
 					Ack:      protocol.Ack,
 					Xor:      m.Xor,
 					Data:     []byte{0x0},
+				}); err != nil {
+					log.Infof("Connection closed.")
+					return
 				}
 			}
 		}

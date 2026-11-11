@@ -438,11 +438,12 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	// Release every attempt, including failed dialing or an incomplete handshake.
+	defer m.phev.Close()
 
 	if err := m.phev.Connect(); err != nil {
 		return err
 	}
-
 	if err := m.phev.Start(); err != nil {
 		return err
 	}
@@ -474,7 +475,6 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 					encodingErrorCount = 0
 				}
 				if encodingErrorCount > 50 {
-					m.phev.Close()
 					updaterTicker.Stop()
 					return fmt.Errorf("Disconnecting due to too many errors")
 				}
@@ -485,12 +485,15 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 					break
 				}
 				m.publishRegister(msg)
-				m.phev.Send <- &protocol.PhevMessage{
+				if err := m.phev.SendMessage(&protocol.PhevMessage{
 					Type:     protocol.CmdOutSend,
 					Register: msg.Register,
 					Ack:      protocol.Ack,
 					Xor:      msg.Xor,
 					Data:     []byte{0x0},
+				}); err != nil {
+					updaterTicker.Stop()
+					return err
 				}
 			}
 		}
