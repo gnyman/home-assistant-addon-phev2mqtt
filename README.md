@@ -19,6 +19,13 @@ More information about local addons at https://developers.home-assistant.io/docs
 
 If you set the debug flag on, it will just start the container and sleep indefinitely, you can then run the phev2mqtt manually, to run "phev2mqtt client watch" for example.
 
+## Reconnecting
+
+Version 1.8 incorporates [upstream PR #62](https://github.com/buxtronix/phev2mqtt/pull/62)
+to close leaked connections and release blocked message queues. It also fixes
+a reader/pinger data race and limits each TCP connection attempt to ten seconds.
+See [reconnect notes](docs/reconnecting.md) for attribution, behavior, and tests.
+
 ## Charging status
 
 Version 1.7 adds a Home Assistant **Charge State** sensor on

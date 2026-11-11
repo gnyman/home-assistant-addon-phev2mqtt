@@ -1,3 +1,8 @@
+# Version 1.8
+* Incorporate [upstream PR #62](https://github.com/buxtronix/phev2mqtt/pull/62), preserving its original authorship, to release leaked connections and unblock shutdown/reconnection
+* Add a ten-second cancellable TCP dial deadline and synchronize the reader/pinger timestamp
+* Cover failed handshakes, full queues, listener shutdown, repeated handshakes, and dial cancellation with offline race-enabled tests
+
 # Version 1.7
 * Add a Home Assistant Charge State sensor on `<prefix>/charge/state`: charging, waiting, unplugged, idle, or error
 * Decode timer waiting/error from register `0x1e`, giving these flags priority over the charging bit
