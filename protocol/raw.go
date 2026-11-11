@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
+	"sync"
 )
 
 type SecurityState int
@@ -17,6 +18,7 @@ const (
 // SecurityKey implements the algorithm for the session encoding/decoding
 // keys.
 type SecurityKey struct {
+	mu          sync.Mutex
 	State       SecurityState
 	proposedKey []byte
 	securityKey byte
@@ -44,6 +46,8 @@ func (s *SecurityKey) AcceptProposal() {
 // then from this security key a key map is generated, essentially
 // an array of session keys which are rotated through.
 func (s *SecurityKey) Update(packet []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(packet) < 12 {
 		s.keyMap = []byte{} // Clear security keys.
 		s.securityKey = 0x0
@@ -91,6 +95,8 @@ func (s *SecurityKey) Update(packet []byte) {
 // The returned value is XORed with the raw packet from the car before
 // decoding it.
 func (s *SecurityKey) RKey(increment bool) byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.keyMap) == 0 {
 		log.Tracef("r_key=empty")
 		return 0
@@ -110,6 +116,8 @@ func (s *SecurityKey) RKey(increment bool) byte {
 // The returned value is XORed with the raw packet before sending
 // it to the car.
 func (s *SecurityKey) SKey(increment bool) byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.keyMap) == 0 {
 		log.Tracef("s_key=empty")
 		return 0
@@ -120,6 +128,20 @@ func (s *SecurityKey) SKey(increment bool) byte {
 	}
 	log.Tracef("s_key=%d", s.keyMap[ret])
 	return s.keyMap[ret]
+}
+
+// ResyncSend follows the expected XOR key reported by the car (0xbb).
+// Resetting the index also keeps subsequent packets in the correct sequence.
+func (s *SecurityKey) ResyncSend(expected byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, key := range s.keyMap {
+		if key == expected {
+			s.sNum = byte(i)
+			return true
+		}
+	}
+	return false
 }
 
 func XorMessageWith(message []byte, xor byte) []byte {

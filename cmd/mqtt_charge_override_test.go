@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"github.com/buxtronix/phev2mqtt/protocol"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"reflect"
 	"strings"
 	"testing"
@@ -141,20 +143,27 @@ func TestChargeTimerOverrideDiscovery(t *testing.T) {
 	}
 
 	want := map[string]interface{}{
-		"name":          "Phev Charge Timer Override (experimental)",
-		"icon":          "mdi:timer-sync-outline",
-		"state_topic":   "~/charge/override",
-		"command_topic": "~/set/charge/override",
-		"payload_on":    "on",
-		"payload_off":   "off",
-		"avty_t":        "~/available",
-		"unique_id":     wantUniqueID,
-		"~":             "phev",
+		"name":              "Phev Charge Timer Override (experimental)",
+		"icon":              "mdi:timer-sync-outline",
+		"state_topic":       "~/charge/override",
+		"command_topic":     "~/set/charge/override",
+		"payload_on":        "on",
+		"payload_off":       "off",
+		"availability_mode": "all",
+		"unique_id":         wantUniqueID,
+		"~":                 "phev",
 	}
 	for key, wantValue := range want {
 		if got := config[key]; got != wantValue {
 			t.Errorf("switch discovery %q = %v, want %v", key, got, wantValue)
 		}
+	}
+	wantAvailability := []interface{}{map[string]interface{}{"topic": "~/available"}, map[string]interface{}{"topic": "~/charge/override/available"}}
+	if !reflect.DeepEqual(config["availability"], wantAvailability) {
+		t.Fatalf("incorrect availability: %v", config["availability"])
+	}
+	if _, exists := config["avty_t"]; exists {
+		t.Fatal("single availability topic overrides freshness checks")
 	}
 	if strings.Contains(raw, oldStateTopic) {
 		t.Errorf("switch discovery still contains old charging state topic %q", oldStateTopic)
@@ -171,5 +180,59 @@ func TestChargeTimerOverrideDiscovery(t *testing.T) {
 		if candidate["unique_id"] == wantUniqueID && topic != wantTopic {
 			t.Errorf("duplicate switch discovery for unique_id %q at %q", wantUniqueID, topic)
 		}
+	}
+}
+
+type recordedPublish struct {
+	topic    string
+	payload  interface{}
+	retained bool
+}
+type recordingMQTT struct {
+	mqtt.Client
+	messages []recordedPublish
+}
+
+func (c *recordingMQTT) Publish(topic string, qos byte, retained bool, payload interface{}) mqtt.Token {
+	c.messages = append(c.messages, recordedPublish{topic, payload, retained})
+	return nil
+}
+
+func TestOverrideNotificationsAndAvailability(t *testing.T) {
+	broker := &recordingMQTT{}
+	m := &mqttClient{client: broker, prefix: "custom/phev", mqttData: map[string]string{}}
+	for _, tc := range []struct {
+		data                  []byte
+		state, available, raw string
+	}{
+		{[]byte{0x12}, "off", "online", "12"},
+		{[]byte{0}, "unknown", "offline", "00"},
+		{nil, "unknown", "offline", ""},
+		{[]byte{0x11}, "on", "online", "11"},
+	} {
+		broker.messages = nil
+		m.publishRegister(&protocol.PhevMessage{Type: protocol.CmdInResp, Ack: protocol.Request, Register: 0x1b, Data: tc.data})
+		msgs := broker.messages
+		if len(msgs) < 3 || msgs[0].topic != "custom/phev/register/1b" || msgs[0].payload != tc.raw || msgs[1].topic != "custom/phev/charge/override" || msgs[1].payload != tc.state {
+			t.Fatalf("wrong register/state publications: %+v", msgs)
+		}
+		last := msgs[len(msgs)-1]
+		if last.topic != "custom/phev/charge/override/available" || last.payload != tc.available || !last.retained {
+			t.Fatalf("wrong availability: %+v", msgs)
+		}
+	}
+	broker.messages = nil
+	m.onMqttConnect(broker)
+	if len(broker.messages) < 1 || broker.messages[0].payload != "offline" || !broker.messages[0].retained {
+		t.Fatalf("reconnect did not invalidate old status: %+v", broker.messages)
+	}
+}
+
+func TestOverrideTimeoutPropagates(t *testing.T) {
+	timeout := errors.New("timed out attempting to set register 17")
+	setter := &fakeRegisterSetter{err: timeout}
+	handled, err := handleChargeTimerOverride("custom/phev/set/charge/override", "custom/phev", []byte("OFF"), setter)
+	if !handled || !errors.Is(err, timeout) || len(setter.calls) != 1 {
+		t.Fatalf("lost error or retried write: handled=%v err=%v calls=%v", handled, err, setter.calls)
 	}
 }
