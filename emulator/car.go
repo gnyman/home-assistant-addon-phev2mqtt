@@ -36,7 +36,7 @@ func (c *Car) Begin() error {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
-				log.Errorf("Accept() error: %v")
+				log.Errorf("Accept() error: %v", err)
 				return
 			}
 			svc := NewConnection(conn, c)
@@ -53,6 +53,7 @@ func (c *Car) Begin() error {
 func (c *Car) SetRegister(register byte, value []byte) error {
 	g := new(errgroup.Group)
 	for _, conn := range c.connections {
+		conn := conn
 		g.Go(func() error {
 			timer := time.After(10 * time.Second)
 			l := conn.AddListener()

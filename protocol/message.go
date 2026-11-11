@@ -293,6 +293,7 @@ const (
 	SettingsRegister         = 0x16
 	ACOperStatusRegister     = 0x1a
 	SetACModeRegisterMY18    = 0x1b
+	ChargeTimerStateRegister = 0x1b
 	ACModeRegister           = 0x1c
 	BatteryLevelRegister     = 0x1d
 	ChargePlugRegister       = 0x1e
@@ -309,6 +310,20 @@ type Register interface {
 	Raw() string
 	String() string
 	Register() byte
+}
+
+func ParseChargeTimerState(data []byte) string {
+	if len(data) == 0 {
+		return "unknown"
+	}
+	switch data[0] & 0x0f {
+	case 0:
+		return "unknown"
+	case 1:
+		return "on"
+	default:
+		return "off"
+	}
 }
 
 type RegisterGeneric struct {
@@ -714,7 +729,6 @@ type RegisterPreACState struct {
 
 func (r *RegisterPreACState) Encode() *PhevMessage {
 	panic("unimplemented")
-	return nil
 }
 
 func (r *RegisterPreACState) Decode(m *PhevMessage) {
@@ -947,7 +961,6 @@ type RegisterLightStatus struct {
 
 func (r *RegisterLightStatus) Encode() *PhevMessage {
 	panic("unimplemented")
-	return nil
 }
 
 func (r *RegisterLightStatus) Decode(m *PhevMessage) {

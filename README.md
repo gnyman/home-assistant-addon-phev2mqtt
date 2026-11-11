@@ -107,6 +107,7 @@ The following topics are published:
 | phev/climate/mode | Mode of the AC, if on. *cool*, *heat*, *windscreen* |
 | phev/climate/[mode] | Alternative of above. Modes are *cool*, *heat*, *windscreen* which can be *off* or *on* |
 | phev/charge/charging | Whether the battery is charging. *on* or *off* |
+| phev/charge/override | Experimental charge timer override state. *on*, *off*, or *unknown* from register 0x1b notifications |
 | phev/charge/plug | If the charging plug is *unplugged* or *connected*. |
 | phev/charge/remaining | Minutes left, if charging. |
 | phev/door/locked | Whether the car is locked. *on* or *off* |
@@ -132,7 +133,8 @@ The following topics are subscribed to and can be used to change state on the ca
 | phev/set/register/[register] | Set register 0x[register] to value 0x[payload] |
 | phev/set/parkinglights | Set parking lights *on* or *off* |
 | phev/set/headlights | Set head lights *on* or *off* |
-| phev/set/cancelchargetimer | Cancel charge timer (any payload) |
+| phev/set/charge/override | Charge timer override: *on* writes 0x17=01, *off* writes 0x17=02 |
+| phev/set/cancelchargetimer | Legacy alias for *on*/*off* charge timer override |
 | phev/set/climate/[mode] | Set ac/climate state (cool/heat/windscreen/off) for [payload] (10[on]/20/30) |
 | phev/set/climate/state | `[payload]=reset` clears "terminated" state |
 | phev/connection | Change car connection state to (on/off/restart) |
