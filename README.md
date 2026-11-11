@@ -11,6 +11,9 @@ Inspired by https://github.com/phev-remote/ but written entirely in Go.
 
 For further hacking, read the [protocol documentation](protocol/README.md).
 
+Reconnect handling includes [upstream PR #62](https://github.com/buxtronix/phev2mqtt/pull/62)
+and additional shutdown/race fixes. See [reconnect notes](docs/reconnecting.md).
+
 Tested against a MY18 vehicle.
 
 ![Home Assistant Screenshot](phev-ha.png)

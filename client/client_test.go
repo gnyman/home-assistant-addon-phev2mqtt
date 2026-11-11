@@ -22,6 +22,7 @@ func startTestServer(t *testing.T) (net.Listener, chan net.Conn) {
 		if err != nil {
 			return
 		}
+		defer conn.Close()
 		connCh <- conn
 		buf := make([]byte, 1024)
 		for {

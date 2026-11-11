@@ -68,6 +68,7 @@ func runRegister(cmd *cobra.Command, args []string) {
 	if err := cl.Connect(); err != nil {
 		panic(err)
 	}
+	defer cl.Close()
 
 	if err := cl.Start(); err != nil {
 		panic(err)

@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ import (
 )
 
 const DefaultAddress = "192.168.8.46:8080"
+const DefaultDialTimeout = 10 * time.Second
 
 // A Listener is for communicating messages from the vehicle to
 // interested clients.
@@ -86,10 +88,16 @@ type Client struct {
 	listeners []*Listener
 	lMu       sync.Mutex
 
-	address string
-	conn    net.Conn
-	lastRx  time.Time
-	started chan struct{}
+	address     string
+	conn        net.Conn
+	connMu      sync.Mutex
+	lastRx      time.Time
+	lastRxMu    sync.Mutex
+	started     chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	dialTimeout time.Duration
+	dialContext func(context.Context, string, string) (net.Conn, error)
 
 	key *protocol.SecurityKey
 
@@ -122,16 +130,21 @@ func AddressOption(address string) func(*Client) {
 
 // New returns a new client, not yet connected.
 func New(opts ...Option) (*Client, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	cl := &Client{
-		Recv:      make(chan *protocol.PhevMessage, 5),
-		Send:      make(chan *protocol.PhevMessage, 5),
-		Settings:  &protocol.Settings{},
-		started:   make(chan struct{}, 2),
-		listeners: []*Listener{},
-		address:   DefaultAddress,
-		key:       &protocol.SecurityKey{},
-		ModelYear: ModelYearUnknown,
-		done:      make(chan struct{}),
+		Recv:        make(chan *protocol.PhevMessage, 5),
+		Send:        make(chan *protocol.PhevMessage, 5),
+		Settings:    &protocol.Settings{},
+		started:     make(chan struct{}, 2),
+		listeners:   []*Listener{},
+		address:     DefaultAddress,
+		key:         &protocol.SecurityKey{},
+		ModelYear:   ModelYearUnknown,
+		done:        make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
+		dialTimeout: DefaultDialTimeout,
+		dialContext: (&net.Dialer{}).DialContext,
 	}
 	for _, o := range opts {
 		o(cl)
@@ -145,6 +158,11 @@ func (c *Client) AddListener() *Listener {
 	defer c.lMu.Unlock()
 	l := &Listener{}
 	l.Start()
+	if c.isClosed() {
+		l.Stop()
+		l.ProcessStop()
+		return l
+	}
 	c.listeners = append(c.listeners, l)
 	return l
 }
@@ -166,9 +184,18 @@ func (c *Client) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
 		close(c.done)
+		c.cancel()
+		c.connMu.Lock()
 		if c.conn != nil {
 			err = c.conn.Close()
 		}
+		c.connMu.Unlock()
+		c.lMu.Lock()
+		for _, l := range c.listeners {
+			l.Stop()
+			l.ProcessStop()
+		}
+		c.lMu.Unlock()
 	})
 	return err
 }
@@ -189,15 +216,28 @@ func (c *Client) SendMessage(m *protocol.PhevMessage) error {
 
 // Connect connects to the Phev.
 func (c *Client) Connect() error {
-	conn, err := net.Dial("tcp", c.address)
+	if c.isClosed() {
+		return fmt.Errorf("client closed")
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, c.dialTimeout)
+	defer cancel()
+	conn, err := c.dialContext(ctx, "tcp", c.address)
 	if err != nil {
 		return err
 	}
-	log.Info("%PHEV_TCP_CONNECTED%")
+	c.connMu.Lock()
+	if c.isClosed() {
+		c.connMu.Unlock()
+		conn.Close()
+		return fmt.Errorf("client closed")
+	}
 	c.conn = conn
+	c.connMu.Unlock()
+	log.Info("%PHEV_TCP_CONNECTED%")
+	manager := c.AddListener()
+	go c.manage(manager)
 	go c.reader()
 	go c.writer()
-	go c.manage()
 	go c.pinger()
 
 	return nil
@@ -208,16 +248,19 @@ var startTimeout = 20 * time.Second
 // Start waits for the client to start.
 func (c *Client) Start() error {
 	log.Debug("%%PHEV_START_AWAIT%%")
-	startTimer := time.After(startTimeout)
+	startTimer := time.NewTimer(startTimeout)
+	defer startTimer.Stop()
 	for {
 		select {
+		case <-c.done:
+			return fmt.Errorf("client closed")
 		case _, ok := <-c.started:
 			if !ok {
 				log.Debug("%%PHEV_START_CLOSED%%")
 				return fmt.Errorf("receiver closed before getting start request")
 			}
 			log.Debug("%%PHEV_START_DONE%%")
-		case <-startTimer:
+		case <-startTimer.C:
 			log.Debug("%%PHEV_START_TIMEOUT%%")
 			return fmt.Errorf("timed out waiting for start")
 		}
@@ -290,10 +333,13 @@ func (c *Client) pinger() {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for t := range ticker.C {
+		c.lastRxMu.Lock()
+		lastRx := c.lastRx
+		c.lastRxMu.Unlock()
 		switch {
 		case c.isClosed():
 			return
-		case t.Sub(c.lastRx) < 500*time.Millisecond:
+		case t.Sub(lastRx) < 500*time.Millisecond:
 			continue
 		}
 		if err := c.SendMessage(protocol.NewPingRequestMessage(pingSeq)); err != nil {
@@ -307,10 +353,9 @@ func (c *Client) pinger() {
 }
 
 // manages the connection, handling control messages.
-func (c *Client) manage() {
+func (c *Client) manage(ml *Listener) {
 	defer close(c.started)
 	defer log.Debug("%PHEV_MANAGER_END%%")
-	ml := c.AddListener()
 	defer ml.Stop()
 	for m := range ml.C {
 		switch m.Type {
@@ -334,7 +379,12 @@ func (c *Client) manage() {
 				return
 			}
 			log.Debug("%%PHEV_START24_RECV%%")
-			c.started <- struct{}{}
+			select {
+			case c.started <- struct{}{}:
+			case <-c.done:
+				return
+			default:
+			}
 		case protocol.CmdInMy18StartReq:
 			c.ModelYear = ModelYear18
 			if err := c.SendMessage(&protocol.PhevMessage{
@@ -347,7 +397,12 @@ func (c *Client) manage() {
 				return
 			}
 			log.Debug("%%PHEV_START18_RECV%%")
-			c.started <- struct{}{}
+			select {
+			case c.started <- struct{}{}:
+			case <-c.done:
+				return
+			default:
+			}
 		case protocol.CmdInMy14StartReq:
 			c.ModelYear = ModelYear14
 			if err := c.SendMessage(&protocol.PhevMessage{
@@ -360,7 +415,12 @@ func (c *Client) manage() {
 				return
 			}
 			log.Debug("%%PHEV_START14_RECV%%")
-			c.started <- struct{}{}
+			select {
+			case c.started <- struct{}{}:
+			case <-c.done:
+				return
+			default:
+			}
 		}
 	}
 }
@@ -369,15 +429,9 @@ func (c *Client) reader() {
 	defer func() {
 		c.Close()
 		close(c.Recv)
-		c.lMu.Lock()
-		for _, l := range c.listeners {
-			l.Stop()
-			l.ProcessStop()
-		}
-		c.lMu.Unlock()
 	}()
 	for {
-		c.conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(30 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		data := make([]byte, 4096)
 		n, err := c.conn.Read(data)
 		if err != nil {
@@ -387,7 +441,9 @@ func (c *Client) reader() {
 			log.Debug("%PHEV_TCP_READER_CLOSE%")
 			return
 		}
+		c.lastRxMu.Lock()
 		c.lastRx = time.Now()
+		c.lastRxMu.Unlock()
 		log.Tracef("%%PHEV_TCP_RECV_DATA%%: %s", hex.EncodeToString(data[:n]))
 		messages := protocol.NewFromBytes(data[:n], c.key)
 		for _, m := range messages {
@@ -427,7 +483,7 @@ func (c *Client) writer() {
 			data := msg.EncodeToBytes(c.key)
 			log.Debugf("%%PHEV_TCP_SEND_MSG%%: [%02x] %s", msg.Xor, msg.ShortForm())
 			log.Tracef("%%PHEV_TCP_SEND_DATA%%: %s", hex.EncodeToString(data))
-			c.conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(15 * time.Second))
+			c.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 			if _, err := c.conn.Write(data); err != nil {
 				if !c.isClosed() {
 					log.Errorf("%%PHEV_TCP_WRITER_ERROR%%: %v", err)

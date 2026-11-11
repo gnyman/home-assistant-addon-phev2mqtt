@@ -438,14 +438,12 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	// Release every attempt, including failed dialing or an incomplete handshake.
+	defer m.phev.Close()
 
 	if err := m.phev.Connect(); err != nil {
 		return err
 	}
-	// A connection that outlives this attempt keeps pinging the car and
-	// occupies its single client slot, blocking all future reconnects.
-	defer m.phev.Close()
-
 	if err := m.phev.Start(); err != nil {
 		return err
 	}
