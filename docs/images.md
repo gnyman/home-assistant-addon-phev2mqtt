@@ -4,7 +4,7 @@ The source repository workflow `.github/workflows/publish.yaml` tests the Go
 bridge and options launcher, cross-compiles static binaries, builds and smoke-tests
 both supported platforms, then publishes versioned images:
 
-`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10.2`
+`ghcr.io/gnyman/{arch}-addon-phev-dragons:1.10.3`
 
 Architectures: aarch64 (ARM64) and amd64 (x86-64). Home Assistant no longer
 supports the 32-bit i386, armhf, and armv7 architectures, so their image builds

@@ -1,3 +1,8 @@
+# Version 1.10.3
+* Preserve protocol packets split across TCP reads so valid register-write ACKs are not discarded
+* Decode coalesced packets while retaining incomplete trailing bytes, with bounded buffering
+* Add a regression for a climate OFF ACK delivered one byte at a time, plus encrypted framing and split-boundary tests
+
 # Version 1.10.2
 * Build and advertise only the supported Home Assistant architectures: aarch64 and amd64
 * Disable unsupported i386, armhf and armv7 image targets, and remove obsolete 32-bit installation guidance

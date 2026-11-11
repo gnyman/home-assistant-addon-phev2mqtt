@@ -110,3 +110,39 @@ func TestClimateWriteRecoversEncodingComplaint(t *testing.T) {
 		t.Fatal("recovered climate write did not complete")
 	}
 }
+
+func TestClimateWriteACKSplitAcrossTCPReads(t *testing.T) {
+	c, _ := New()
+	conn, peer := net.Pipe()
+	c.conn = conn
+	defer c.Close()
+	defer peer.Close()
+	go c.reader()
+	go c.writer()
+	go func() {
+		for range c.Recv {
+		}
+	}()
+	result := make(chan error, 1)
+	go func() { result <- c.SetRegister(0x1b, []byte{1, 0, 0, 0}) }()
+	peer.SetDeadline(time.Now().Add(2 * time.Second))
+	request := make([]byte, 9)
+	if _, err := io.ReadFull(peer, request); err != nil {
+		t.Fatal(err)
+	}
+	ack := &protocol.PhevMessage{Type: protocol.CmdInResp, Ack: protocol.Ack, Register: 0x1b, Data: []byte{0}}
+	// TCP is a stream: even this six-byte ACK may arrive in separate reads.
+	for _, b := range ack.EncodeToBytes(&protocol.SecurityKey{}) {
+		if _, err := peer.Write([]byte{b}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("valid climate ACK was lost when TCP split it across reads")
+	}
+}

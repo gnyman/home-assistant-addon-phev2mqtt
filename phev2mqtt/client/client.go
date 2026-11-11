@@ -437,6 +437,7 @@ func (c *Client) manage(ml *Listener) {
 }
 
 func (c *Client) reader() {
+	decoder := protocol.NewStreamDecoder(c.key)
 	defer func() {
 		c.Close()
 		close(c.Recv)
@@ -455,9 +456,9 @@ func (c *Client) reader() {
 		c.lastRxMu.Lock()
 		c.lastRx = time.Now()
 		c.lastRxMu.Unlock()
-		messages := protocol.NewFromBytes(data[:n], c.key)
+		messages := decoder.Feed(data[:n])
 		if len(messages) == 0 {
-			log.Tracef("%%PHEV_TCP_RECV_UNDECODED%%: %s", hex.EncodeToString(data[:n]))
+			log.Tracef("%%PHEV_TCP_RECV_BUFFERED%%: %s", hex.EncodeToString(data[:n]))
 		}
 		for _, m := range messages {
 			if m.Type == protocol.CmdInBadEncoding && len(m.Data) > 0 {

@@ -35,3 +35,17 @@ Pre-AC termination status arrives in register `0x10` and is exposed as
 can remain visible while AC is off. A termination status alone does not prove
 why a particular command timed out. This release adds no automatic termination
 reset or extra climate writes.
+
+## TCP framing
+
+Version 1.10.3 fixes a confirmed receiver bug: it treated each TCP read as a
+complete packet buffer and could discard a write ACK split across reads. The
+receiver now retains incomplete bytes and decodes complete packets in order.
+The regression test delivers a valid climate OFF ACK one byte at a time; it
+fails before the fix and passes afterwards. Coalesced and encrypted packet
+streams are also tested across all split positions.
+
+This is a possible explanation for an intermittent missing-ACK timeout, not
+proof of the cause of every vehicle timeout. No arbitrary startup delay or
+automatic climate retry/reset is added. The message labelled `START RESP`
+(0x2f) is documented as a keepalive and is not used as a readiness gate.
