@@ -1,5 +1,9 @@
+# Version 1.5
+* Run with init: false to to allow it to start on newer HA instances. See https://developers.home-assistant.io/blog/2022/05/12/s6-overlay-base-images/
+* Accept phev_ip and phev_port as parameters in case your PHEV is elsewhere
+
 # Version 1.4
-* Changed startup: before to startup: application as before no longer supported and it should really start after Home Assistant
+* Changed "startup": "before" to "startup": "application" as "before" no longer supported and it should really start after Home Assistant
 
 # Version 1.3
 * Removed host networking as it wasn't required

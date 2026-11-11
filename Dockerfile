@@ -1,10 +1,6 @@
 ARG BUILD_FROM
 FROM $BUILD_FROM as builder
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-ENV LANG C.UTF-8
-
 RUN apk update && apk add --no-cache \
 	g++ \
 	gcc \
@@ -12,7 +8,7 @@ RUN apk update && apk add --no-cache \
 	libpcap-dev
 
 WORKDIR /tmp
-RUN git clone -b StMond-patch-1 --single-branch https://github.com/StMond/phev2mqtt.git
+RUN git clone https://github.com/buxtronix/phev2mqtt.git
 COPY --from=golang:alpine /usr/local/go/ /usr/local/go/
 RUN cd /tmp/phev2mqtt && \
     /usr/local/go/bin/go build
@@ -23,7 +19,7 @@ RUN apk update && apk add --no-cache \
 
 COPY --from=builder /tmp/phev2mqtt/phev2mqtt /opt/phev2mqtt
 
-COPY run.sh /
-RUN chmod a+x /run.sh
+COPY run.sh /opt
+RUN chmod a+x /opt/run.sh
 
-CMD [ "/run.sh" ]
+CMD [ "/opt/run.sh" ]

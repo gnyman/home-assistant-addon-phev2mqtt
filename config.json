@@ -1,0 +1,26 @@
+{
+  "name": "PHEV",
+  "version": "1.5",
+  "slug": "phev",
+  "description": "Mitsubishi PHEV",
+  "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
+  "startup": "application",
+  "boot": "auto",
+  "init": "false",
+  "options": {
+    "mqtt_server": "172.30.32.1:1883",
+    "mqtt_user": null,
+    "mqtt_password": null,
+    "debug": false,
+    "phev_ip": "192.168.8.46",
+    "phev_port": "8080"
+  },
+  "schema": {
+    "mqtt_server": "str",
+    "mqtt_user": "str",
+    "mqtt_password": "str",
+    "debug": "bool",
+    "phev_ip": "str",
+    "phev_port": "port"
+  }
+}
