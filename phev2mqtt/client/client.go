@@ -88,16 +88,19 @@ type Client struct {
 	listeners []*Listener
 	lMu       sync.Mutex
 
-	address     string
-	conn        net.Conn
-	connMu      sync.Mutex
-	lastRx      time.Time
-	lastRxMu    sync.Mutex
-	started     chan struct{}
-	ctx         context.Context
-	cancel      context.CancelFunc
-	dialTimeout time.Duration
-	dialContext func(context.Context, string, string) (net.Conn, error)
+	address          string
+	conn             net.Conn
+	connMu           sync.Mutex
+	connectedAt      time.Time
+	lastRx           time.Time
+	lastRxMu         sync.Mutex
+	disconnectMu     sync.Mutex
+	disconnectReason error
+	started          chan struct{}
+	ctx              context.Context
+	cancel           context.CancelFunc
+	dialTimeout      time.Duration
+	dialContext      func(context.Context, string, string) (net.Conn, error)
 
 	logPings bool
 	key      *protocol.SecurityKey
@@ -206,6 +209,28 @@ func (c *Client) Close() error {
 	return err
 }
 
+// recordDisconnect keeps the first failure which ended a TCP connection. The
+// caller that owns the reconnect loop can then report the real cause rather
+// than just observing that Recv was closed.
+func (c *Client) recordDisconnect(err error) {
+	if err == nil {
+		return
+	}
+	c.disconnectMu.Lock()
+	defer c.disconnectMu.Unlock()
+	if c.disconnectReason == nil {
+		c.disconnectReason = err
+	}
+}
+
+// DisconnectReason returns the first TCP failure which closed this client.
+// It is nil when Close was requested by the caller.
+func (c *Client) DisconnectReason() error {
+	c.disconnectMu.Lock()
+	defer c.disconnectMu.Unlock()
+	return c.disconnectReason
+}
+
 // SendMessage queues a message for sending to the car. Unlike sending
 // directly to the Send channel, it will not block if the client is closed.
 func (c *Client) SendMessage(m *protocol.PhevMessage) error {
@@ -225,11 +250,12 @@ func (c *Client) Connect() error {
 	if c.isClosed() {
 		return fmt.Errorf("client closed")
 	}
+	log.Debugf("PHEV TCP dial starting: address=%s timeout=%s", c.address, c.dialTimeout)
 	ctx, cancel := context.WithTimeout(c.ctx, c.dialTimeout)
 	defer cancel()
 	conn, err := c.dialContext(ctx, "tcp", c.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("PHEV TCP dial failed: address=%s timeout=%s: %w", c.address, c.dialTimeout, err)
 	}
 	c.connMu.Lock()
 	if c.isClosed() {
@@ -238,8 +264,9 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("client closed")
 	}
 	c.conn = conn
+	c.connectedAt = time.Now()
 	c.connMu.Unlock()
-	log.Info("%PHEV_TCP_CONNECTED%")
+	log.Infof("PHEV TCP connected: local=%s remote=%s", conn.LocalAddr(), conn.RemoteAddr())
 	manager := c.AddListener()
 	go c.manage(manager)
 	go c.reader()
@@ -448,9 +475,17 @@ func (c *Client) reader() {
 		n, err := c.conn.Read(data)
 		if err != nil {
 			if !c.isClosed() {
-				log.Debug("%%PHEV_TCP_READER_ERROR%%: ", err)
+				c.lastRxMu.Lock()
+				lastRx := c.lastRx
+				c.lastRxMu.Unlock()
+				lastRxText := "never"
+				if !lastRx.IsZero() {
+					lastRxText = time.Since(lastRx).Round(time.Millisecond).String() + " ago"
+				}
+				reason := fmt.Errorf("TCP read failed: %w", err)
+				c.recordDisconnect(reason)
+				log.Warnf("PHEV TCP reader stopped: address=%s connected_for=%s last_receive=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), lastRxText, err)
 			}
-			log.Debug("%PHEV_TCP_READER_CLOSE%")
 			return
 		}
 		c.lastRxMu.Lock()
@@ -499,9 +534,10 @@ func (c *Client) writer() {
 			c.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 			if _, err := c.conn.Write(data); err != nil {
 				if !c.isClosed() {
-					log.Errorf("%%PHEV_TCP_WRITER_ERROR%%: %v", err)
+					reason := fmt.Errorf("TCP write failed: %w", err)
+					c.recordDisconnect(reason)
+					log.Warnf("PHEV TCP writer stopped: address=%s connected_for=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), err)
 				}
-				log.Debug("%PHEV_TCP_WRITER_CLOSE%")
 				c.Close()
 				return
 			}

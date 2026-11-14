@@ -28,7 +28,6 @@ import (
 var (
 	cfgFile   string
 	logLevel  string
-	logTimes  bool
 	logSyslog bool
 	logPings  bool
 )
@@ -48,17 +47,13 @@ var rootCmd = &cobra.Command{
 		if logSyslog {
 			journalhook.Enable()
 		}
-		if logTimes {
-			log.SetFormatter(&log.TextFormatter{
-				FullTimestamp: true,
-			})
-		} else {
-			log.SetFormatter(&log.TextFormatter{
-				FullTimestamp:    false,
-				DisableColors:    true,
-				DisableTimestamp: true,
-			})
-		}
+		// Container logs need wall-clock timestamps to correlate Wi-Fi, MQTT,
+		// and vehicle failures. Keep the logfmt-like text output used by the
+		// add-on, but make timestamps unconditional.
+		log.SetFormatter(&log.TextFormatter{
+			FullTimestamp: true,
+			DisableColors: true,
+		})
 	},
 
 	// Uncomment the following line if your bare application
@@ -82,7 +77,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.phev2mqtt.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "verbosity", "v", "info", "logging level to use")
-	rootCmd.PersistentFlags().BoolVarP(&logTimes, "log_timestamps", "t", false, "coloured logging with timestamps")
+	rootCmd.PersistentFlags().BoolP("log_timestamps", "t", true, "Deprecated: timestamps are always enabled")
 	rootCmd.PersistentFlags().BoolVarP(&logSyslog, "log_syslog", "s", false, "plain logging to syslog instead of console")
 
 	// Cobra also supports local flags, which will only run

@@ -142,9 +142,10 @@ type mqttClient struct {
 	mqttData       map[string]string
 	updateInterval time.Duration
 
-	phev        *client.Client
-	lastConnect time.Time
-	lastError   error
+	phev         *client.Client
+	lastConnect  time.Time
+	lastError    error
+	phevAttempts uint64
 
 	prefix string
 
@@ -189,12 +190,16 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 		SetPassword(mqttPassword).
 		SetAutoReconnect(true).
 		SetOnConnectHandler(m.onMqttConnect).
+		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+			log.Warnf("MQTT connection lost: broker=%s error=%v", mqttServer, err)
+		}).
 		SetDefaultPublishHandler(m.handleIncomingMqtt).
 		SetWill(m.topic("/available"), "offline", 0, true)
 
 	m.client = mqtt.NewClient(m.options)
+	log.Infof("MQTT connection starting: broker=%s", mqttServer)
 	if token := m.client.Connect(); token.Wait() && token.Error() != nil {
-		return token.Error()
+		return fmt.Errorf("MQTT initial connection failed: broker=%s: %w", mqttServer, token.Error())
 	}
 
 	if !mqttDisableSet {
@@ -246,6 +251,7 @@ func (m *mqttClient) publish(topic, payload string) {
 }
 
 func (m *mqttClient) onMqttConnect(c mqtt.Client) {
+	log.Info("MQTT connected")
 	m.publishOverrideAvailability(c, false)
 	m.resetChargeState(c)
 }
@@ -434,19 +440,23 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 	defer m.resetChargeState(m.client)
 	var err error
 	address := viper.GetString("address")
+	m.phevAttempts++
+	attempt := m.phevAttempts
+	log.Debugf("PHEV connection attempt starting: attempt=%d address=%s", attempt, address)
 	m.phev, err = client.New(client.AddressOption(address), client.LogPingsOption(logPings))
 	if err != nil {
-		return err
+		return fmt.Errorf("PHEV connection attempt=%d client setup failed: %w", attempt, err)
 	}
 	// Release every attempt, including failed dialing or an incomplete handshake.
 	defer m.phev.Close()
 
 	if err := m.phev.Connect(); err != nil {
-		return err
+		return fmt.Errorf("PHEV connection attempt=%d failed: %w", attempt, err)
 	}
 	if err := m.phev.Start(); err != nil {
-		return err
+		return fmt.Errorf("PHEV connection attempt=%d handshake failed: %w", attempt, err)
 	}
+	log.Infof("PHEV connection ready: attempt=%d model_year=%d", attempt, m.phev.ModelYear)
 	m.client.Publish(m.topic("/available"), 0, true, "online")
 
 	m.lastError = nil
@@ -459,15 +469,19 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 	var lastEncodingError time.Time
 
 	updaterTicker := time.NewTicker(m.updateInterval)
+	defer updaterTicker.Stop()
 	for {
 		select {
 		case <-updaterTicker.C:
-			m.phev.SetRegister(0x6, []byte{0x3})
+			if err := m.phev.SetRegister(0x6, []byte{0x3}); err != nil {
+				log.Warnf("PHEV periodic update request failed: attempt=%d register=06 error=%v", attempt, err)
+			}
 		case msg, ok := <-m.phev.Recv:
 			if !ok {
-				log.Infof("Connection closed.")
-				updaterTicker.Stop()
-				return fmt.Errorf("Connection closed.")
+				if reason := m.phev.DisconnectReason(); reason != nil {
+					return fmt.Errorf("PHEV connection attempt=%d closed: %w", attempt, reason)
+				}
+				return fmt.Errorf("PHEV connection attempt=%d closed without a TCP error (client was stopped locally)", attempt)
 			}
 			switch msg.Type {
 			case protocol.CmdInBadEncoding:
@@ -475,8 +489,7 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 					encodingErrorCount = 0
 				}
 				if encodingErrorCount > 50 {
-					updaterTicker.Stop()
-					return fmt.Errorf("Disconnecting due to too many errors")
+					return fmt.Errorf("PHEV connection attempt=%d stopped after %d bad-encoding responses in 15 seconds", attempt, encodingErrorCount)
 				}
 				encodingErrorCount += 1
 				lastEncodingError = time.Now()
@@ -492,8 +505,7 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 					Xor:      msg.Xor,
 					Data:     []byte{0x0},
 				}); err != nil {
-					updaterTicker.Stop()
-					return err
+					return fmt.Errorf("PHEV connection attempt=%d failed acknowledging register %02x: %w", attempt, msg.Register, err)
 				}
 			}
 		}

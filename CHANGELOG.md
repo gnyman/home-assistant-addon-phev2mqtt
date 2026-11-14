@@ -1,3 +1,7 @@
+# Version 1.10.4
+* Add timestamped MQTT and PHEV TCP connection diagnostics, including dial, handshake, reader, writer, and reconnect failure causes
+* Preserve and report the original TCP disconnection error instead of a generic closed-connection message
+
 # Version 1.10.3
 * Preserve protocol packets split across TCP reads so valid register-write ACKs are not discarded
 * Decode coalesced packets while retaining incomplete trailing bytes, with bounded buffering
