@@ -27,13 +27,18 @@ import (
 	"github.com/spf13/viper"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	log "github.com/sirupsen/logrus"
 )
 
-const defaultWifiRestartCmd = "sudo ip link set wlan0 down && sleep 3 && sudo ip link set wlan0 up"
+const (
+	defaultWifiRestartCmd = "sudo ip link set wlan0 down && sleep 3 && sudo ip link set wlan0 up"
+	phevRetryMin          = time.Second
+	phevRetryMax          = 3 * time.Minute
+)
 
 // mqttCmd represents the mqtt command
 var mqttCmd = &cobra.Command{
@@ -142,9 +147,12 @@ type mqttClient struct {
 	mqttData       map[string]string
 	updateInterval time.Duration
 
+	phevMu       sync.Mutex
 	phev         *client.Client
+	phevReady    bool
+	phevWake     chan struct{}
 	lastConnect  time.Time
-	lastError    error
+	retryDelay   time.Duration
 	phevAttempts uint64
 
 	prefix string
@@ -155,7 +163,7 @@ type mqttClient struct {
 
 	climate     *climate
 	chargeState chargeState
-	enabled     bool
+	disabled    bool
 }
 
 func (m *mqttClient) topic(topic string) string {
@@ -163,7 +171,7 @@ func (m *mqttClient) topic(topic string) string {
 }
 
 func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
-	m.enabled = true // Default.
+	m.phevWake = make(chan struct{}, 1)
 
 	mqttServer := viper.GetString("mqtt_server")
 	mqttUsername := viper.GetString("mqtt_username")
@@ -181,7 +189,6 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 	}
 
 	m.haPublishedDiscovery = false
-	m.lastError = nil
 
 	m.options = mqtt.NewClientOptions().
 		AddBroker(mqttServer).
@@ -219,28 +226,56 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 	m.mqttData = map[string]string{}
 
 	for {
-		if m.enabled {
+		m.phevMu.Lock()
+		enabled := !m.disabled
+		m.phevMu.Unlock()
+		if enabled {
 			if err := m.handlePhev(cmd); err != nil {
-				// Do not flood the log with the same messages every second
-				if m.lastError == nil || m.lastError.Error() != err.Error() {
-					log.Error(err)
-					m.lastError = err
+				delay := nextPhevRetryDelay(m.retryDelay)
+				if m.retryDelay == 0 {
+					log.Warnf("%v; retrying in %s", err, delay)
+				} else {
+					log.Debugf("%v; retrying in %s", err, delay)
 				}
+				m.retryDelay = delay
 			}
-			// Publish as offline if last connection was >30s ago.
-			if time.Now().Sub(m.lastConnect) > 30*time.Second {
-				m.client.Publish(m.topic("/available"), 0, true, "offline")
-			}
-			// Restart Wifi interface if > wifi_restart_time.
-			if wifiRestartTime > 0 && time.Now().Sub(m.lastConnect) > wifiRestartTime {
+			if wifiRestartTime > 0 && time.Since(m.lastConnect) > wifiRestartTime {
 				if err := restartWifi(cmd); err != nil {
 					log.Errorf("Error restarting wifi: %v", err)
 				}
 			}
 		}
 
-		time.Sleep(time.Second)
+		var retry <-chan time.Time
+		var timer *time.Timer
+		if enabled {
+			timer = time.NewTimer(m.retryDelay)
+			retry = timer.C
+		}
+		select {
+		case <-retry:
+		case <-m.phevWake:
+			m.retryDelay = 0
+		case <-cmd.Context().Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return nil
+		}
+		if timer != nil {
+			timer.Stop()
+		}
 	}
+}
+
+func nextPhevRetryDelay(previous time.Duration) time.Duration {
+	if previous == 0 {
+		return phevRetryMin
+	}
+	if previous >= phevRetryMax/2 {
+		return phevRetryMax
+	}
+	return previous * 2
 }
 
 func (m *mqttClient) publish(topic, payload string) {
@@ -252,6 +287,13 @@ func (m *mqttClient) publish(topic, payload string) {
 
 func (m *mqttClient) onMqttConnect(c mqtt.Client) {
 	log.Info("MQTT connected")
+	m.phevMu.Lock()
+	availability := "offline"
+	if m.phevReady {
+		availability = "online"
+	}
+	c.Publish(m.topic("/available"), 0, true, availability)
+	m.phevMu.Unlock()
 	m.publishOverrideAvailability(c, false)
 	m.resetChargeState(c)
 }
@@ -266,6 +308,43 @@ func (m *mqttClient) publishOverrideAvailability(c mqtt.Client, available bool) 
 
 func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Message) {
 	log.Infof("Topic: [%s] Payload: [%s]", msg.Topic(), msg.Payload())
+
+	m.phevMu.Lock()
+	phev := m.phev
+	if msg.Topic() == m.topic("/connection") {
+		payload := strings.ToLower(string(msg.Payload()))
+		switch payload {
+		case "off":
+			m.disabled = true
+		case "on", "restart":
+			m.disabled = false
+		default:
+			m.phevMu.Unlock()
+			return
+		}
+		if payload != "on" {
+			m.phevReady = false
+			m.phev = nil
+			if phev != nil {
+				phev.Close()
+			}
+			m.client.Publish(m.topic("/available"), 0, true, "offline")
+		}
+		if !m.phevReady {
+			select {
+			case m.phevWake <- struct{}{}:
+			default:
+			}
+		}
+		m.phevMu.Unlock()
+		return
+	}
+	ready := m.phevReady
+	m.phevMu.Unlock()
+	if !ready {
+		log.Debugf("Ignoring MQTT command while PHEV is offline: topic=%s", msg.Topic())
+		return
+	}
 
 	topicParts := strings.Split(msg.Topic(), "/")
 	if strings.HasPrefix(msg.Topic(), m.topic("/set/register/")) {
@@ -283,28 +362,14 @@ func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Messag
 			log.Infof("Bad payload [%s]: %v", msg.Payload(), err)
 			return
 		}
-		if err := m.phev.SetRegister(register[0], data); err != nil {
+		if err := phev.SetRegister(register[0], data); err != nil {
 			log.Infof("Error setting register %02x: %v", register[0], err)
 			return
-		}
-	} else if msg.Topic() == m.topic("/connection") {
-		payload := strings.ToLower(string(msg.Payload()))
-		switch payload {
-		case "off":
-			m.enabled = false
-			m.phev.Close()
-			m.client.Publish(m.topic("/available"), 0, true, "offline")
-		case "on":
-			m.enabled = true
-		case "restart":
-			m.enabled = true
-			m.client.Publish(m.topic("/available"), 0, true, "offline")
-			m.phev.Close()
 		}
 	} else if msg.Topic() == m.topic("/set/parkinglights") {
 		values := map[string]byte{"on": 0x1, "off": 0x2}
 		if v, ok := values[strings.ToLower(string(msg.Payload()))]; ok {
-			if err := m.phev.SetRegister(0xb, []byte{v}); err != nil {
+			if err := phev.SetRegister(0xb, []byte{v}); err != nil {
 				log.Infof("Error setting register 0xb: %v", err)
 				return
 			}
@@ -312,12 +377,12 @@ func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Messag
 	} else if msg.Topic() == m.topic("/set/headlights") {
 		values := map[string]byte{"on": 0x1, "off": 0x2}
 		if v, ok := values[strings.ToLower(string(msg.Payload()))]; ok {
-			if err := m.phev.SetRegister(0xa, []byte{v}); err != nil {
+			if err := phev.SetRegister(0xa, []byte{v}); err != nil {
 				log.Infof("Error setting register 0xb: %v", err)
 				return
 			}
 		}
-	} else if handled, err := handleChargeTimerOverride(msg.Topic(), m.prefix, msg.Payload(), m.phev); handled {
+	} else if handled, err := handleChargeTimerOverride(msg.Topic(), m.prefix, msg.Payload(), phev); handled {
 		if err != nil {
 			if errors.Is(err, errInvalidChargeTimerOverride) {
 				log.Warnf("Rejected charge timer override command on %s: %v (payload %q)", msg.Topic(), err, string(msg.Payload()))
@@ -328,7 +393,7 @@ func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Messag
 	} else if strings.HasPrefix(msg.Topic(), m.topic("/set/climate/state")) {
 		payload := strings.ToLower(string(msg.Payload()))
 		if payload == "reset" {
-			if err := m.phev.SetRegister(protocol.SetAckPreACTermRegister, []byte{0x1}); err != nil {
+			if err := phev.SetRegister(protocol.SetAckPreACTermRegister, []byte{0x1}); err != nil {
 				log.Infof("Error acknowledging Pre-AC termination: %v", err)
 				return
 			}
@@ -358,13 +423,13 @@ func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Messag
 			return
 		}
 
-		if m.phev.ModelYear == client.ModelYear14 {
+		if phev.ModelYear == client.ModelYear14 {
 			// Set the AC mode first
 			registerPayload := bytes.Repeat([]byte{0xff}, 15)
 			registerPayload[0] = 0x0
 			registerPayload[1] = 0x0
 			registerPayload[6] = mode | duration
-			if err := m.phev.SetRegister(protocol.SetACModeRegisterMY14, registerPayload); err != nil {
+			if err := phev.SetRegister(protocol.SetACModeRegisterMY14, registerPayload); err != nil {
 				log.Infof("Error setting AC mode: %v", err)
 				return
 			}
@@ -374,24 +439,24 @@ func (m *mqttClient) handleIncomingMqtt(mqtt_client mqtt.Client, msg mqtt.Messag
 			if mode == 0x0 {
 				acEnabled = 0x01
 			}
-			if err := m.phev.SetRegister(protocol.SetACEnabledRegisterMY14, []byte{acEnabled}); err != nil {
+			if err := phev.SetRegister(protocol.SetACEnabledRegisterMY14, []byte{acEnabled}); err != nil {
 				log.Infof("Error setting AC enabled state: %v", err)
 				return
 			}
-		} else if m.phev.ModelYear == client.ModelYear18 || m.phev.ModelYear == client.ModelYear24 {
+		} else if phev.ModelYear == client.ModelYear18 || phev.ModelYear == client.ModelYear24 {
 			state := byte(0x02)
 			if mode == 0x0 {
 				state = 0x1
 			}
-			if err := m.phev.SetRegister(protocol.SetACModeRegisterMY18, []byte{state, mode, duration, 0x0}); err != nil {
+			if err := phev.SetRegister(protocol.SetACModeRegisterMY18, []byte{state, mode, duration, 0x0}); err != nil {
 				log.Infof("Error setting AC mode: %v", err)
 				return
 			}
 		}
 	} else if msg.Topic() == m.topic("/settings/dump") {
 		log.Infof("CURRENT_SETTINGS:")
-		log.Infof("\n%s", m.phev.Settings.Dump())
-		m.phev.Settings.Clear()
+		log.Infof("\n%s", phev.Settings.Dump())
+		phev.Settings.Clear()
 	} else {
 		log.Errorf("Unknown topic from mqtt: %s", msg.Topic())
 	}
@@ -433,55 +498,87 @@ func handleChargeTimerOverride(topic, prefix string, payload []byte, setter regi
 	}
 }
 
-func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
-	m.publishOverrideAvailability(m.client, false)
-	defer m.publishOverrideAvailability(m.client, false)
-	m.resetChargeState(m.client)
-	defer m.resetChargeState(m.client)
-	var err error
+func (m *mqttClient) handlePhev(cmd *cobra.Command) (result error) {
 	address := viper.GetString("address")
 	m.phevAttempts++
 	attempt := m.phevAttempts
 	log.Debugf("PHEV connection attempt starting: attempt=%d address=%s", attempt, address)
-	m.phev, err = client.New(client.AddressOption(address), client.LogPingsOption(logPings))
+	phev, err := client.New(client.AddressOption(address), client.LogPingsOption(logPings))
 	if err != nil {
 		return fmt.Errorf("PHEV connection attempt=%d client setup failed: %w", attempt, err)
 	}
-	// Release every attempt, including failed dialing or an incomplete handshake.
-	defer m.phev.Close()
+	defer phev.Close()
 
-	if err := m.phev.Connect(); err != nil {
+	m.phevMu.Lock()
+	if m.disabled {
+		m.phevMu.Unlock()
+		return nil
+	}
+	m.phev = phev
+	m.phevMu.Unlock()
+	defer func() {
+		m.phevMu.Lock()
+		if m.phev != phev {
+			result = nil // The MQTT connection control canceled this attempt.
+		}
+		m.phevMu.Unlock()
+	}()
+
+	if err := phev.Connect(); err != nil {
 		return fmt.Errorf("PHEV connection attempt=%d failed: %w", attempt, err)
 	}
-	if err := m.phev.Start(); err != nil {
+	if err := phev.Start(); err != nil {
 		return fmt.Errorf("PHEV connection attempt=%d handshake failed: %w", attempt, err)
 	}
-	log.Infof("PHEV connection ready: attempt=%d model_year=%d", attempt, m.phev.ModelYear)
+	m.phevMu.Lock()
+	if m.phev != phev {
+		m.phevMu.Unlock()
+		return nil
+	}
+	m.phevReady = true
+	log.Infof("PHEV connection ready: attempt=%d model_year=%d", attempt, phev.ModelYear)
 	m.client.Publish(m.topic("/available"), 0, true, "online")
+	m.phevMu.Unlock()
 
-	m.lastError = nil
-
+	m.retryDelay = 0
+	defer m.publishOverrideAvailability(m.client, false)
+	defer m.resetChargeState(m.client)
 	defer func() {
+		m.phevMu.Lock()
+		if m.phevReady {
+			m.phevReady = false
+			m.client.Publish(m.topic("/available"), 0, true, "offline")
+		}
+		m.phevMu.Unlock()
 		m.lastConnect = time.Now()
 	}()
 
 	var encodingErrorCount = 0
 	var lastEncodingError time.Time
 
+	var ctxDone <-chan struct{}
+	if ctx := cmd.Context(); ctx != nil {
+		ctxDone = ctx.Done()
+	}
 	updaterTicker := time.NewTicker(m.updateInterval)
 	defer updaterTicker.Stop()
 	for {
 		select {
+		case <-ctxDone:
+			return nil
 		case <-updaterTicker.C:
-			if err := m.phev.SetRegister(0x6, []byte{0x3}); err != nil {
-				log.Warnf("PHEV periodic update request failed: attempt=%d register=06 error=%v", attempt, err)
-			}
-		case msg, ok := <-m.phev.Recv:
-			if !ok {
-				if reason := m.phev.DisconnectReason(); reason != nil {
+			if err := phev.SetRegister(0x6, []byte{0x3}); err != nil {
+				if reason := phev.DisconnectReason(); reason != nil {
 					return fmt.Errorf("PHEV connection attempt=%d closed: %w", attempt, reason)
 				}
-				return fmt.Errorf("PHEV connection attempt=%d closed without a TCP error (client was stopped locally)", attempt)
+				return fmt.Errorf("PHEV connection attempt=%d periodic update request failed: %w", attempt, err)
+			}
+		case msg, ok := <-phev.Recv:
+			if !ok {
+				if reason := phev.DisconnectReason(); reason != nil {
+					return fmt.Errorf("PHEV connection attempt=%d closed: %w", attempt, reason)
+				}
+				return nil
 			}
 			switch msg.Type {
 			case protocol.CmdInBadEncoding:
@@ -498,7 +595,7 @@ func (m *mqttClient) handlePhev(cmd *cobra.Command) error {
 					break
 				}
 				m.publishRegister(msg)
-				if err := m.phev.SendMessage(&protocol.PhevMessage{
+				if err := phev.SendMessage(&protocol.PhevMessage{
 					Type:     protocol.CmdOutSend,
 					Register: msg.Register,
 					Ack:      protocol.Ack,
@@ -528,10 +625,6 @@ func (m *mqttClient) publishRegister(msg *protocol.PhevMessage) {
 	if msg.Register == protocol.ChargeTimerStateRegister {
 		state := protocol.ParseChargeTimerState(msg.Data)
 		m.publish("/charge/override", state)
-		if state != "unknown" {
-			// A fresh notification also restores global availability after MQTT reconnect.
-			m.client.Publish(m.topic("/available"), 0, true, "online")
-		}
 		m.publishOverrideAvailability(m.client, state != "unknown")
 	}
 	switch reg := msg.Reg.(type) {

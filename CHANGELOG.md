@@ -1,3 +1,7 @@
+# Version 1.10.5
+* Back off retries to three minutes while the vehicle is unreachable and reset the delay after a successful handshake
+* Log repeated connection failures at debug level and reconnect when periodic updates go unacknowledged
+
 # Version 1.10.4
 * Add timestamped MQTT and PHEV TCP connection diagnostics, including dial, handshake, reader, writer, and reconnect failure causes
 * Preserve and report the original TCP disconnection error instead of a generic closed-connection message

@@ -266,7 +266,7 @@ func (c *Client) Connect() error {
 	c.conn = conn
 	c.connectedAt = time.Now()
 	c.connMu.Unlock()
-	log.Infof("PHEV TCP connected: local=%s remote=%s", conn.LocalAddr(), conn.RemoteAddr())
+	log.Debugf("PHEV TCP connected: local=%s remote=%s", conn.LocalAddr(), conn.RemoteAddr())
 	manager := c.AddListener()
 	go c.manage(manager)
 	go c.reader()
@@ -484,7 +484,7 @@ func (c *Client) reader() {
 				}
 				reason := fmt.Errorf("TCP read failed: %w", err)
 				c.recordDisconnect(reason)
-				log.Warnf("PHEV TCP reader stopped: address=%s connected_for=%s last_receive=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), lastRxText, err)
+				log.Debugf("PHEV TCP reader stopped: address=%s connected_for=%s last_receive=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), lastRxText, err)
 			}
 			return
 		}
@@ -536,7 +536,7 @@ func (c *Client) writer() {
 				if !c.isClosed() {
 					reason := fmt.Errorf("TCP write failed: %w", err)
 					c.recordDisconnect(reason)
-					log.Warnf("PHEV TCP writer stopped: address=%s connected_for=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), err)
+					log.Debugf("PHEV TCP writer stopped: address=%s connected_for=%s error=%v", c.address, time.Since(c.connectedAt).Round(time.Millisecond), err)
 				}
 				c.Close()
 				return
