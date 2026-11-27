@@ -190,7 +190,37 @@ type recordedPublish struct {
 }
 type recordingMQTT struct {
 	mqtt.Client
-	messages []recordedPublish
+	messages      []recordedPublish
+	subscriptions []map[string]byte
+}
+
+type completedSubscription struct{ mqtt.Token }
+
+func (completedSubscription) Wait() bool   { return true }
+func (completedSubscription) Error() error { return nil }
+
+func (c *recordingMQTT) SubscribeMultiple(topics map[string]byte, _ mqtt.MessageHandler) mqtt.Token {
+	c.subscriptions = append(c.subscriptions, topics)
+	return completedSubscription{}
+}
+
+func TestSubscriptionsOnEveryConnection(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		broker := &recordingMQTT{}
+		m := &mqttClient{prefix: "custom", disableSet: disabled}
+		want := map[string]byte{"custom/connection": 0, "custom/settings/#": 0}
+		if !disabled {
+			want["custom/set/#"] = 0
+		}
+		for i := 0; i < 2; i++ {
+			if err := m.onMqttConnect(broker); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reflect.DeepEqual(broker.subscriptions, []map[string]byte{want, want}) {
+			t.Fatalf("disableSet=%v: subscriptions %v", disabled, broker.subscriptions)
+		}
+	}
 }
 
 func (c *recordingMQTT) Publish(topic string, qos byte, retained bool, payload interface{}) mqtt.Token {

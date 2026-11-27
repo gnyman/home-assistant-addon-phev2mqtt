@@ -155,7 +155,8 @@ type mqttClient struct {
 	retryDelay   time.Duration
 	phevAttempts uint64
 
-	prefix string
+	prefix     string
+	disableSet bool
 
 	haDiscovery          bool
 	haDiscoveryPrefix    string
@@ -176,7 +177,7 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 	mqttServer := viper.GetString("mqtt_server")
 	mqttUsername := viper.GetString("mqtt_username")
 	mqttPassword := viper.GetString("mqtt_password")
-	mqttDisableSet := viper.GetBool("mqtt_disable_register_set_command")
+	m.disableSet = viper.GetBool("mqtt_disable_register_set_command")
 	m.prefix = viper.GetString("mqtt_topic_prefix")
 	m.haDiscovery = viper.GetBool("ha_discovery")
 	m.haDiscoveryPrefix = viper.GetString("ha_discovery_prefix")
@@ -190,13 +191,25 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 
 	m.haPublishedDiscovery = false
 
+	if m.disableSet {
+		log.Info("Setting vehicle registers via MQTT is disabled")
+	}
+	m.mqttData = map[string]string{}
+	initialSubscriptions := make(chan error, 1)
+	var initialConnect sync.Once
 	m.options = mqtt.NewClientOptions().
 		AddBroker(mqttServer).
 		SetClientID("phev2mqtt").
 		SetUsername(mqttUsername).
 		SetPassword(mqttPassword).
 		SetAutoReconnect(true).
-		SetOnConnectHandler(m.onMqttConnect).
+		SetOnConnectHandler(func(c mqtt.Client) {
+			err := m.onMqttConnect(c)
+			if err != nil {
+				log.Errorf("MQTT subscription setup failed: %v", err)
+			}
+			initialConnect.Do(func() { initialSubscriptions <- err })
+		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 			log.Warnf("MQTT connection lost: broker=%s error=%v", mqttServer, err)
 		}).
@@ -209,21 +222,10 @@ func (m *mqttClient) Run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("MQTT initial connection failed: broker=%s: %w", mqttServer, token.Error())
 	}
 
-	if !mqttDisableSet {
-		if token := m.client.Subscribe(m.topic("/set/#"), 0, nil); token.Wait() && token.Error() != nil {
-			return token.Error()
-		}
-	} else {
-		log.Info("Setting vechicle registers via MQTT is disabled")
+	if err := <-initialSubscriptions; err != nil {
+		m.client.Disconnect(0)
+		return err
 	}
-	if token := m.client.Subscribe(m.topic("/connection"), 0, nil); token.Wait() && token.Error() != nil {
-		return token.Error()
-	}
-	if token := m.client.Subscribe(m.topic("/settings/#"), 0, nil); token.Wait() && token.Error() != nil {
-		return token.Error()
-	}
-
-	m.mqttData = map[string]string{}
 
 	for {
 		m.phevMu.Lock()
@@ -285,8 +287,25 @@ func (m *mqttClient) publish(topic, payload string) {
 	// }
 }
 
-func (m *mqttClient) onMqttConnect(c mqtt.Client) {
+func (m *mqttClient) onMqttConnect(c mqtt.Client) error {
 	log.Info("MQTT connected")
+	topics := map[string]byte{m.topic("/connection"): 0, m.topic("/settings/#"): 0}
+	if !m.disableSet {
+		topics[m.topic("/set/#")] = 0
+	}
+	token := c.SubscribeMultiple(topics, nil)
+	token.Wait()
+	if err := token.Error(); err != nil {
+		return err
+	}
+	if ack, ok := token.(*mqtt.SubscribeToken); ok {
+		for topic, code := range ack.Result() {
+			if code == 0x80 {
+				return fmt.Errorf("broker rejected subscription to %s", topic)
+			}
+		}
+	}
+	log.Info("MQTT subscriptions ready")
 	m.phevMu.Lock()
 	availability := "offline"
 	if m.phevReady {
@@ -296,6 +315,7 @@ func (m *mqttClient) onMqttConnect(c mqtt.Client) {
 	m.phevMu.Unlock()
 	m.publishOverrideAvailability(c, false)
 	m.resetChargeState(c)
+	return nil
 }
 
 func (m *mqttClient) publishOverrideAvailability(c mqtt.Client, available bool) {

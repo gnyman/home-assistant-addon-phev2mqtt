@@ -1,3 +1,6 @@
+# Version 1.10.6
+* Restore command, connection, and settings subscriptions whenever MQTT reconnects. Log when subscriptions are ready.
+
 # Version 1.10.5
 * Back off retries to three minutes while the vehicle is unreachable and reset the delay after a successful handshake
 * Log repeated connection failures at debug level and reconnect when periodic updates go unacknowledged
